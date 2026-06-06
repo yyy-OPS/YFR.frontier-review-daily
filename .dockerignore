@@ -1,0 +1,12 @@
+apps/web/node_modules
+apps/web/dist
+services/agent/__pycache__
+services/agent/app/__pycache__
+**/__pycache__
+data
+.env
+*.zip
+*.log
+tmp_*
+.tmp-*
+.serena
