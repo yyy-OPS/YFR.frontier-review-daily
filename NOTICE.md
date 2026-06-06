@@ -10,6 +10,10 @@ This project is based on and extended from:
 
 - [niuniu-869/Biblio_Agent](https://github.com/niuniu-869/Biblio_Agent)
 
+The multi-source literature retrieval workflow also references:
+
+- [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp)
+
 The current project adds and adapts functionality for multi-topic scheduled literature monitoring, Daily Delta review modes, hybrid literature retrieval, evidence scoring, private review access, WeChat Official Account draft generation, open-access PDF detection, translation, and deployable Docker workflows.
 
 ## Community Acknowledgement

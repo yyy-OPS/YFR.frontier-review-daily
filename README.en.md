@@ -1,8 +1,8 @@
 # Frontier Review
 
-Frontier Review is a self-hostable multi-topic literature monitoring and review-generation system for researchers, engineering teams, and research-content operators. Administrators can configure multiple research topics, schedule or manually trigger literature search, evidence filtering, deduplication, field merging, quality scoring, Daily Delta classification, LLM-based review writing, infographic generation, open-access PDF detection, translation, and WeChat Official Account draft creation.
+Frontier Review is a self-hostable multi-topic literature monitoring and review-generation system for researchers, engineering teams, and research-content operators. Administrators can configure multiple research topics, schedule or manually trigger multi-source literature search, evidence filtering, deduplication, field merging, quality scoring, Daily Delta classification, LLM-based review writing, infographic generation, open-access PDF detection, translation, and WeChat Official Account draft creation.
 
-This project is extended and engineered from the ideas and part of the technical foundation of [niuniu-869/Biblio_Agent](https://github.com/niuniu-869/Biblio_Agent). It focuses on long-running multi-topic frontier monitoring and traceable AI-assisted review production. Thanks to the original project author and contributors.
+This project is extended and engineered from the ideas and part of the technical foundation of [niuniu-869/Biblio_Agent](https://github.com/niuniu-869/Biblio_Agent), and it also references the multi-source paper search approach of [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp). It focuses on long-running multi-topic frontier monitoring and traceable AI-assisted review production. Thanks to the related open-source authors and contributors.
 
 [中文 README](./README.md)
 
@@ -20,7 +20,7 @@ This is not a one-shot Q&A tool, and it is not a strict PRISMA systematic-review
 
 - Multi-topic management with independent routes, histories, and Daily Delta thresholds.
 - Public and private reviews. Private topics are hidden from public routes and require an access key.
-- Hybrid literature retrieval from Sciverse and Paper Search HTTP adapters.
+- Hybrid literature retrieval from Sciverse and Paper Search HTTP adapters, inspired in part by paper-search-mcp's multi-source retrieval workflow.
 - Field normalization across Semantic Scholar, OpenAlex, Crossref, Europe PMC, HAL, BASE, CORE, Unpaywall, Sciverse, and related sources.
 - DOI/title/uniqueId/docId deduplication with metadata merging.
 - Evidence scoring for relevance, quality, completeness, and novelty.
@@ -204,6 +204,7 @@ This project is open sourced to invite collaboration on traceable AI-assisted li
 ## Attribution and Community
 
 - This project is extended from [niuniu-869/Biblio_Agent](https://github.com/niuniu-869/Biblio_Agent).
+- Its multi-source literature retrieval workflow also references [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp).
 - Thanks to the [LINUX DO](https://linux.do/) community for open-source discussion, feedback, and project sharing.
 - Author profile: [violetreay on LINUX DO](https://linux.do/u/violetreay/summary).
 
