@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from typing import AsyncIterator, Protocol
 from urllib.parse import urlparse
 
@@ -34,6 +35,7 @@ class OpenAICompatibleClient:
         self.api_key = api_key
         self.base_url = _normalize_openai_base_url(base_url)
         self.model = model
+        self.max_retries = int(getattr(settings, "llm_max_retries", 3))
 
     async def stream(self, messages: list[dict], temperature: float = 0.3, max_tokens: int = 2048, json_mode: bool = False) -> AsyncIterator[str]:
         body: dict = {
@@ -46,26 +48,40 @@ class OpenAICompatibleClient:
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
-                async with client.stream("POST", f"{self.base_url}/chat/completions", json=body, headers=headers) as res:
-                    if res.status_code != 200:
-                        detail = (await res.aread()).decode("utf-8", errors="ignore")[:400]
-                        raise LLMError(f"LLM API 错误 {res.status_code}: {detail}")
-                    async for line in res.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if data == "[DONE]":
-                            break
-                        try:
-                            delta = json.loads(data)["choices"][0]["delta"].get("content")
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
-                        if delta:
-                            yield delta
-        except httpx.HTTPError as exc:
-            raise LLMError(f"LLM 服务不可达: {exc}") from exc
+        last_error: LLMError | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
+                    async with client.stream("POST", f"{self.base_url}/chat/completions", json=body, headers=headers) as res:
+                        if res.status_code != 200:
+                            detail = (await res.aread()).decode("utf-8", errors="ignore")[:400]
+                            error = LLMError(f"LLM API 错误 {res.status_code}: {detail}")
+                            if _should_retry_llm_error(res.status_code, detail) and attempt < self.max_retries:
+                                last_error = error
+                                await _sleep_before_retry(attempt)
+                                continue
+                            raise error
+                        async for line in res.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == "[DONE]":
+                                break
+                            try:
+                                delta = json.loads(data)["choices"][0]["delta"].get("content")
+                            except (json.JSONDecodeError, KeyError, IndexError):
+                                continue
+                            if delta:
+                                yield delta
+                        return
+            except httpx.HTTPError as exc:
+                last_error = LLMError(f"LLM 服务不可达: {exc}")
+                if attempt < self.max_retries:
+                    await _sleep_before_retry(attempt)
+                    continue
+                raise last_error from exc
+        if last_error:
+            raise last_error
 
     async def complete(self, messages: list[dict], temperature: float = 0.3, max_tokens: int = 2048, json_mode: bool = False) -> str:
         body: dict = {
@@ -78,17 +94,31 @@ class OpenAICompatibleClient:
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
-                res = await client.post(f"{self.base_url}/chat/completions", json=body, headers=headers)
-            if res.status_code != 200:
-                raise LLMError(f"LLM API 错误 {res.status_code}: {res.text[:400]}")
-            data = res.json()
-            return str(data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
-        except httpx.HTTPError as exc:
-            raise LLMError(f"LLM 服务不可达: {exc}") from exc
-        except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
-            raise LLMError(f"LLM 返回格式异常: {exc}") from exc
+        last_error: LLMError | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
+                    res = await client.post(f"{self.base_url}/chat/completions", json=body, headers=headers)
+                if res.status_code != 200:
+                    error = LLMError(f"LLM API 错误 {res.status_code}: {res.text[:400]}")
+                    if _should_retry_llm_error(res.status_code, res.text) and attempt < self.max_retries:
+                        last_error = error
+                        await _sleep_before_retry(attempt)
+                        continue
+                    raise error
+                data = res.json()
+                return str(data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+            except httpx.HTTPError as exc:
+                last_error = LLMError(f"LLM 服务不可达: {exc}")
+                if attempt < self.max_retries:
+                    await _sleep_before_retry(attempt)
+                    continue
+                raise last_error from exc
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+                raise LLMError(f"LLM 返回格式异常: {exc}") from exc
+        if last_error:
+            raise last_error
+        return ""
 
 
 def get_llm_client(api_key: str | None = None, base_url: str | None = None, model: str | None = None) -> LLMClient:
@@ -106,3 +136,23 @@ def _normalize_openai_base_url(base_url: str) -> str:
     if parsed.scheme and parsed.netloc and parsed.path in ("", "/"):
         return f"{url}/v1"
     return url
+
+
+def _should_retry_llm_error(status_code: int, detail: str) -> bool:
+    lowered = (detail or "").lower()
+    if status_code in {408, 409, 425, 429, 500, 502, 503, 504}:
+        return True
+    transient_markers = (
+        "upstream authentication failed",
+        "bad gateway",
+        "temporarily unavailable",
+        "timeout",
+        "rate limit",
+        "too many requests",
+        "当前 api 不支持所选模型",
+    )
+    return status_code == 404 and any(marker in lowered for marker in transient_markers)
+
+
+async def _sleep_before_retry(attempt: int) -> None:
+    await asyncio.sleep(min(8.0, 0.8 * (2 ** attempt)))

@@ -61,6 +61,7 @@ class Settings:
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     openai_base_url: str = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
     openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    llm_max_retries: int = int(os.environ.get("LLM_MAX_RETRIES", "3"))
     deepseek_model: str = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
     review_records_limit: int = int(os.environ.get("REVIEW_RECORDS_LIMIT", "40"))
     # 三层领域数据层 (Library/Project/Corpus)

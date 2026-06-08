@@ -3304,16 +3304,21 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
 
 .daily-progress-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   gap: 0.75rem;
+  min-width: 0;
 }
 
 .daily-progress-item {
   display: grid;
   gap: 0.55rem;
+  grid-template-rows: auto auto auto auto 1fr auto;
   border: 1px solid #d3cabd;
   background: #fffdf8;
   padding: 0.8rem;
+  min-width: 0;
+  overflow: hidden;
+  align-content: start;
 }
 
 .daily-progress-head {
@@ -3321,14 +3326,18 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
+  min-width: 0;
 }
 
 .daily-progress-head strong {
   font-size: 0.95rem;
   line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .daily-progress-head span {
+  flex: 0 0 auto;
   border: 1px solid #22201d;
   padding: 0.18rem 0.42rem;
   font-size: 0.72rem;
@@ -3406,11 +3415,71 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   color: #38342f;
   font-size: 0.86rem;
   line-height: 1.55;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.daily-progress-item small {
+.daily-progress-message {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.daily-progress-message strong {
+  color: #242220;
+  font-size: 0.82rem;
+}
+
+.daily-progress-message span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.daily-progress-item small,
+.daily-progress-meta {
   color: #6b645c;
   line-height: 1.45;
+  min-width: 0;
+}
+
+.daily-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem 0.5rem;
+  align-items: center;
+}
+
+.daily-progress-meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.daily-progress-meta span:not(:last-child)::after {
+  content: "·";
+  margin-left: 0.5rem;
+  color: #b5aa9b;
+}
+
+.daily-progress-error {
+  max-height: 5.6rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #e2b6a8;
+  background: #fff7f4;
+  color: #8d2d1d;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.daily-progress-item .daily-test-btn {
+  justify-self: end;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
 }
 
 .daily-admin {

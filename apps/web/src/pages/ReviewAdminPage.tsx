@@ -47,6 +47,10 @@ function formatDate(value?: string | null): string {
   return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function compactRunText(value?: string | null): string {
+  return (value || "").replace(/\s+/g, " ").trim();
+}
+
 function usableSecret(value: string): string | undefined {
   const secret = value.trim();
   if (!secret || secret.includes("*") || secret.includes("...")) return undefined;
@@ -414,13 +418,15 @@ export function ReviewAdminPage() {
                 <div className="daily-progress-bar" aria-label={`${item.topicName} ${item.mode === "indeterminate" ? "阶段处理中" : `进度 ${item.percent}%`}`}>
                   <i style={item.mode === "indeterminate" ? undefined : { width: `${item.percent}%` }} />
                 </div>
-                <p>{item.stage}：{item.message}</p>
-                <small>
-                  {item.mode === "indeterminate" ? "等待外部服务返回" : `${item.current || 0}${item.total ? ` / ${item.total}` : ""}`}
-                  {item.detail ? ` · ${item.detail}` : ""} · 更新 {formatDate(item.updatedAt)}
-                  {item.latestRunAt ? ` · 最近日报 ${formatDate(item.latestRunAt)}，${item.latestPaperCount ?? 0} 篇` : ""}
-                  {item.draftId ? ` · 暂存 ${item.draftId}${item.draftStage ? `/${item.draftStage}` : ""}` : ""}
+                <p className="daily-progress-message"><strong>{item.stage}</strong><span>{compactRunText(item.message)}</span></p>
+                <small className="daily-progress-meta">
+                  <span>{item.mode === "indeterminate" ? "等待外部服务返回" : `${item.current || 0}${item.total ? ` / ${item.total}` : ""}`}</span>
+                  {item.detail && <span>{compactRunText(item.detail)}</span>}
+                  <span>更新 {formatDate(item.updatedAt)}</span>
+                  {item.latestRunAt && <span>最近日报 {formatDate(item.latestRunAt)}，{item.latestPaperCount ?? 0} 篇</span>}
+                  {item.draftId && <span>暂存 {item.draftId}{item.draftStage ? `/${item.draftStage}` : ""}</span>}
                 </small>
+                {item.error && <pre className="daily-progress-error">{compactRunText(item.error)}</pre>}
                 {item.draftCanResume && item.draftId && (
                   <button className="btn btn-ghost daily-test-btn" onClick={() => void handleResumeDraft(item.draftId || "")}>从暂存继续</button>
                 )}
@@ -443,8 +449,12 @@ export function ReviewAdminPage() {
                   <strong>{draft.topicName || draft.topic}</strong>
                   <span>{draft.canResume ? "可继续" : draft.status}</span>
                 </div>
-                <p>{draft.stage}：{draft.paperCount} 篇暂存证据，全文片段 {draft.fullTextFetched} 篇</p>
-                <small>暂存 {draft.draftId} · 更新 {formatDate(draft.updatedAt)}{draft.error ? ` · ${draft.error}` : ""}</small>
+                <p className="daily-progress-message"><strong>{draft.stage}</strong><span>{draft.paperCount} 篇暂存证据，全文片段 {draft.fullTextFetched} 篇</span></p>
+                <small className="daily-progress-meta">
+                  <span>暂存 {draft.draftId}</span>
+                  <span>更新 {formatDate(draft.updatedAt)}</span>
+                </small>
+                {draft.error && <pre className="daily-progress-error">{compactRunText(draft.error)}</pre>}
                 {draft.canResume && <button className="btn btn-ghost daily-test-btn" onClick={() => void handleResumeDraft(draft.draftId)}>调整配置后继续</button>}
               </article>
             ))}
