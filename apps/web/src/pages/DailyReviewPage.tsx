@@ -1,5 +1,5 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import html2canvas from "html2canvas";
 import {
   ApiError,
@@ -192,9 +192,11 @@ async function saveCanvasAsPng(canvas: HTMLCanvasElement, filename: string): Pro
 
 export function DailyReviewPage({ exclusive = false }: { exclusive?: boolean }) {
   const { topicSlug, runId } = useParams();
+  const navigate = useNavigate();
   const reviewExportRef = useRef<HTMLDivElement>(null);
   const [exclusiveKey, setExclusiveKey] = useState(() => sessionStorage.getItem(EXCLUSIVE_KEY_STORAGE) || "");
   const [exclusiveInput, setExclusiveInput] = useState("");
+  const [exclusiveChecking, setExclusiveChecking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [result, setResult] = useState<DailyReviewRunResult | null>(null);
@@ -276,6 +278,12 @@ export function DailyReviewPage({ exclusive = false }: { exclusive?: boolean }) 
   }, [result, topicSlug, topics]);
 
   const reviewBasePath = exclusive ? "/admin/exclusive-review" : "/daily-review";
+
+  useEffect(() => {
+    if (exclusive && exclusiveKey && !topicSlug && topics[0]?.slug) {
+      navigate(`${reviewBasePath}/${topics[0].slug}`, { replace: true });
+    }
+  }, [exclusive, exclusiveKey, topicSlug, topics, navigate, reviewBasePath]);
 
   const evidenceStats = useMemo(() => {
     if (!result) return null;
@@ -442,6 +450,28 @@ export function DailyReviewPage({ exclusive = false }: { exclusive?: boolean }) 
     }
   }
 
+  async function handleExclusiveEnter() {
+    const key = exclusiveInput.trim();
+    if (!key || exclusiveChecking) return;
+    setExclusiveChecking(true);
+    setError("");
+    try {
+      const topicList = await getExclusiveReviewTopics(key);
+      sessionStorage.setItem(EXCLUSIVE_KEY_STORAGE, key);
+      setExclusiveKey(key);
+      setTopics(topicList.items);
+      if (topicList.items[0]?.slug) {
+        navigate(`/admin/exclusive-review/${topicList.items[0].slug}`, { replace: true });
+      }
+    } catch (e) {
+      sessionStorage.removeItem(EXCLUSIVE_KEY_STORAGE);
+      setExclusiveKey("");
+      setError(e instanceof ApiError ? e.message : "专属综述访问密钥验证失败");
+    } finally {
+      setExclusiveChecking(false);
+    }
+  }
+
   if (exclusive && !exclusiveKey) {
     return (
       <main className="daily-page standalone exclusive-review-gate">
@@ -455,14 +485,13 @@ export function DailyReviewPage({ exclusive = false }: { exclusive?: boolean }) 
         <section className="daily-admin-card exclusive-key-card">
           <label>访问密钥<input type="password" value={exclusiveInput} onChange={(e) => setExclusiveInput(e.target.value)} onKeyDown={(e) => {
             if (e.key === "Enter" && exclusiveInput.trim()) {
-              sessionStorage.setItem(EXCLUSIVE_KEY_STORAGE, exclusiveInput.trim());
-              setExclusiveKey(exclusiveInput.trim());
+              void handleExclusiveEnter();
             }
           }} /></label>
-          <button className="daily-run" type="button" disabled={!exclusiveInput.trim()} onClick={() => {
-            sessionStorage.setItem(EXCLUSIVE_KEY_STORAGE, exclusiveInput.trim());
-            setExclusiveKey(exclusiveInput.trim());
-          }}>进入专属综述</button>
+          <button className="daily-run" type="button" disabled={!exclusiveInput.trim() || exclusiveChecking} onClick={() => void handleExclusiveEnter()}>
+            {exclusiveChecking ? "正在验证..." : "进入专属综述"}
+          </button>
+          {error && <p className="daily-status bad">{error}</p>}
           <p className="daily-hint">该入口不使用管理员登录态；只校验专属综述访问密钥。请勿公开分享访问密钥。</p>
         </section>
       </main>
@@ -512,8 +541,8 @@ export function DailyReviewPage({ exclusive = false }: { exclusive?: boolean }) 
           ))}
           {!topics.length && (
             <div className="daily-empty">
-              <h3>暂无公开主题</h3>
-              <p>当前还没有可浏览的公开主题。主题开放后会自动显示在这里。</p>
+              <h3>{exclusive ? "暂无专属主题" : "暂无公开主题"}</h3>
+              <p>{exclusive ? "密钥验证通过，但当前没有启用的专属主题。请在管理员后台将主题设置为专属并启用。" : "当前还没有可浏览的公开主题。主题开放后会自动显示在这里。"}</p>
             </div>
           )}
         </section>
