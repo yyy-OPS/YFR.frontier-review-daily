@@ -23,6 +23,8 @@ This is not a one-shot Q&A tool, and it is not a strict PRISMA systematic-review
 - Hybrid literature retrieval from Sciverse and Paper Search HTTP adapters, inspired in part by paper-search-mcp's multi-source retrieval workflow.
 - Field normalization across Semantic Scholar, OpenAlex, Crossref, Europe PMC, HAL, BASE, CORE, Unpaywall, Sciverse, and related sources.
 - DOI/title/uniqueId/docId deduplication with metadata merging.
+- Literature-only search page: the public `/literature-search` route lets users enter a topic and paper count, returning searched and scored evidence without generating a full review.
+- Administrator CDKs: admins can issue CDKs for public literature search, with independent enable/disable state, usage limits, expiry time, per-search paper limits, and source restrictions.
 - Evidence scoring for relevance, quality, completeness, and novelty.
 - Daily Delta mode selection based on per-topic historical indexes.
 - Dynamic subtitles generated from the topic, subtopic pool, recent history, and evidence.
@@ -34,7 +36,7 @@ This is not a one-shot Q&A tool, and it is not a strict PRISMA systematic-review
 - Legal open-access PDF detection. The system does not bypass paywalls.
 - WeChat Official Account module for turning reviews into draft articles.
 - Draft persistence and resume support when LLM/image generation fails.
-- Beijing-time scheduling and configurable scheduler concurrency.
+- Beijing-time scheduling, defaulting to one topic at a time to reduce LLM upstream overload; concurrency remains configurable by environment variable when needed.
 
 ## Tech Stack
 
@@ -124,6 +126,7 @@ LLM_MAX_RETRIES=3
 DAILY_REVIEW_LITERATURE_PROVIDER=hybrid
 PAPER_SEARCH_SOURCES=semantic,openalex,crossref,europepmc,hal,base,core,unpaywall
 PAPER_SEARCH_VALIDATE_LINKS=true
+DAILY_REVIEW_SCHEDULER_CONCURRENCY=1
 
 UNPAYWALL_EMAIL=your-email@example.com
 OPENALEX_MAILTO=your-email@example.com

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { DailyReviewPage } from "./pages/DailyReviewPage";
+import { LiteratureSearchPage } from "./pages/LiteratureSearchPage";
 import { ReviewAdminPage } from "./pages/ReviewAdminPage";
 import { WechatAdminPage } from "./pages/WechatAdminPage";
 
@@ -11,6 +12,7 @@ export function AppRoutes() {
       <Route path="/daily-review" element={<DailyReviewPage />} />
       <Route path="/daily-review/:topicSlug/:runId" element={<DailyReviewPage />} />
       <Route path="/daily-review/:topicSlug" element={<DailyReviewPage />} />
+      <Route path="/literature-search" element={<LiteratureSearchPage />} />
       <Route path="/admin" element={<ReviewAdminPage />} />
       <Route path="/admin/exclusive-review" element={<DailyReviewPage exclusive />} />
       <Route path="/admin/exclusive-review/:topicSlug/:runId" element={<DailyReviewPage exclusive />} />

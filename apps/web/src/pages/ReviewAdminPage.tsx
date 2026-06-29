@@ -57,6 +57,29 @@ function usableSecret(value: string): string | undefined {
   return secret;
 }
 
+function randomCdk(): string {
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  return `yfr-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function newLiteratureCdk() {
+  const id = `cdk-${Date.now().toString(36)}`;
+  return {
+    id,
+    name: "文献检索 CDK",
+    code: randomCdk(),
+    enabled: true,
+    maxUses: 50,
+    usedCount: 0,
+    expiresAt: "",
+    paperCountMax: 100,
+    literatureProvider: null,
+    paperSearchSources: [],
+    note: "",
+  };
+}
+
 function newTopic(): ReviewTopicConfig {
   const id = `topic-${Date.now().toString(36)}`;
   return {
@@ -94,6 +117,8 @@ const EMPTY_CONFIG: DailyReviewConfig = {
   literatureProvider: "hybrid",
   paperSearchSources: ["semantic", "openalex", "crossref", "europepmc", "hal", "base", "core", "unpaywall"],
   exclusiveAccessKey: "",
+  literatureSearchCdk: "",
+  literatureSearchCdks: [],
   activeTopicId: "general-ai-research",
   topics: [
     {
@@ -207,6 +232,21 @@ export function ReviewAdminPage() {
       activeTopicId: selectedTopic.id,
       topics: old.topics.map((topic) => topic.id === selectedTopic.id ? { ...topic, ...patch } : topic),
     }));
+  }
+
+  function addLiteratureCdk() {
+    setConfig((old) => ({ ...old, literatureSearchCdks: [...(old.literatureSearchCdks ?? []), newLiteratureCdk()] }));
+  }
+
+  function updateLiteratureCdk(id: string, patch: Partial<NonNullable<DailyReviewConfig["literatureSearchCdks"]>[number]>) {
+    setConfig((old) => ({
+      ...old,
+      literatureSearchCdks: (old.literatureSearchCdks ?? []).map((cdk) => cdk.id === id ? { ...cdk, ...patch } : cdk),
+    }));
+  }
+
+  function removeLiteratureCdk(id: string) {
+    setConfig((old) => ({ ...old, literatureSearchCdks: (old.literatureSearchCdks ?? []).filter((cdk) => cdk.id !== id) }));
   }
 
   function addTopic() {
@@ -522,6 +562,43 @@ export function ReviewAdminPage() {
           </div>
           <button className="btn btn-ghost daily-test-btn" onClick={() => void testConnection("paper_search")}>测试 Paper Search</button>
           {connectionStatus.paper_search && <p className={`daily-status ${connectionStatus.paper_search.startsWith("连接成功") ? "ok" : "bad"}`}>{connectionStatus.paper_search}</p>}
+          <div className="daily-subpanel literature-cdk-panel">
+            <div className="daily-section-head">
+              <div>
+                <h3>公开文献检索 CDK</h3>
+                <p className="daily-hint">用户可用 CDK 借用管理员 LLM 做主题拆解；每个 CDK 可独立限制次数、有效期、最大文献数和检索源。</p>
+              </div>
+              <button type="button" className="btn btn-ghost daily-test-btn" onClick={addLiteratureCdk}>生成 CDK</button>
+            </div>
+            {(config.literatureSearchCdks ?? []).length === 0 && <p className="daily-hint">暂无 CDK。用户仍可在公开检索页填写自己的 LLM 服务。</p>}
+            {(config.literatureSearchCdks ?? []).map((cdk) => (
+              <div key={cdk.id} className="literature-cdk-card">
+                <div className="daily-grid-2">
+                  <label>名称<input value={cdk.name} onChange={(e) => updateLiteratureCdk(cdk.id, { name: e.target.value })} /></label>
+                  <label>CDK<input value={cdk.code} placeholder={maskedPlaceholder(Boolean(cdk.code), "yfr-...")} onChange={(e) => updateLiteratureCdk(cdk.id, { code: e.target.value })} /></label>
+                  <label>最大使用次数<input type="number" min={1} max={100000} value={cdk.maxUses} onChange={(e) => updateLiteratureCdk(cdk.id, { maxUses: fieldNumber(e.target.value, 50) })} /></label>
+                  <label>已用次数<input type="number" min={0} max={cdk.maxUses} value={cdk.usedCount} onChange={(e) => updateLiteratureCdk(cdk.id, { usedCount: fieldNumber(e.target.value, 0) })} /></label>
+                  <label>单次最大文献数<input type="number" min={5} max={200} value={cdk.paperCountMax} onChange={(e) => updateLiteratureCdk(cdk.id, { paperCountMax: fieldNumber(e.target.value, 100) })} /></label>
+                  <label>过期时间（北京时间）<input type="datetime-local" value={(cdk.expiresAt ?? "").slice(0, 16)} onChange={(e) => updateLiteratureCdk(cdk.id, { expiresAt: e.target.value || null })} /></label>
+                  <label>检索源覆盖<select value={cdk.literatureProvider ?? ""} onChange={(e) => updateLiteratureCdk(cdk.id, { literatureProvider: e.target.value ? e.target.value as DailyReviewConfig["literatureProvider"] : null })}>
+                    <option value="">跟随全局配置</option>
+                    <option value="sciverse">Sciverse</option>
+                    <option value="paper_search">Paper Search 多源</option>
+                    <option value="hybrid">Hybrid 混合检索</option>
+                  </select></label>
+                  <label>Paper Search 来源覆盖<input value={(cdk.paperSearchSources ?? []).join(",")} placeholder="留空则跟随全局" onChange={(e) => updateLiteratureCdk(cdk.id, { paperSearchSources: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label>
+                </div>
+                <label>备注<input value={cdk.note ?? ""} onChange={(e) => updateLiteratureCdk(cdk.id, { note: e.target.value })} /></label>
+                <div className="daily-checks literature-cdk-actions">
+                  <label><input type="checkbox" checked={cdk.enabled} onChange={(e) => updateLiteratureCdk(cdk.id, { enabled: e.target.checked })} /> 启用该 CDK</label>
+                  <span>剩余 {Math.max(0, cdk.maxUses - cdk.usedCount)} 次</span>
+                  <button type="button" className="btn btn-ghost daily-test-btn" onClick={() => updateLiteratureCdk(cdk.id, { enabled: false })}>立即停用</button>
+                  <button type="button" className="btn btn-ghost daily-test-btn" onClick={() => updateLiteratureCdk(cdk.id, { code: randomCdk(), usedCount: 0 })}>重置 CDK</button>
+                  <button type="button" className="btn btn-ghost daily-test-btn" onClick={() => removeLiteratureCdk(cdk.id)}>删除</button>
+                </div>
+              </div>
+            ))}
+          </div>
           <label>Sciverse Token<input type="password" value={config.sciverseApiToken} placeholder={maskedPlaceholder(config.sciverseTokenConfigured, "Bearer token")} onChange={(e) => setConfig((old) => ({ ...old, sciverseApiToken: e.target.value }))} /></label>
           <button className="btn btn-ghost daily-test-btn" onClick={() => void testConnection("sciverse")}>测试 Sciverse</button>
           {connectionStatus.sciverse && <p className={`daily-status ${connectionStatus.sciverse.startsWith("连接成功") ? "ok" : "bad"}`}>{connectionStatus.sciverse}</p>}

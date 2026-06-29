@@ -49,7 +49,7 @@ class Settings:
     require_secure_config: bool = _env_bool("FRONTIER_REVIEW_REQUIRE_SECURE_CONFIG", False)
     enable_api_docs: bool = _env_bool("FRONTIER_REVIEW_ENABLE_DOCS", False)
     enable_daily_review_scheduler: bool = _env_bool("FRONTIER_REVIEW_ENABLE_SCHEDULER", True)
-    daily_review_scheduler_concurrency: int = int(os.environ.get("DAILY_REVIEW_SCHEDULER_CONCURRENCY", "2"))
+    daily_review_scheduler_concurrency: int = int(os.environ.get("DAILY_REVIEW_SCHEDULER_CONCURRENCY", "1"))
     admin_login_rate_limit_per_minute: int = int(os.environ.get("ADMIN_LOGIN_RATE_LIMIT_PER_MINUTE", "10"))
     translation_rate_limit_per_minute: int = int(os.environ.get("TRANSLATION_RATE_LIMIT_PER_MINUTE", "30"))
     max_cached_image_bytes: int = int(os.environ.get("MAX_CACHED_IMAGE_BYTES", str(10 * 1024 * 1024)))

@@ -44,6 +44,7 @@ ALLOWED_IMAGE_CONTENT_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image
 TRANSLATION_RATE_BUCKETS: dict[str, list[float]] = {}
 ADMIN_LOGIN_RATE_BUCKETS: dict[str, list[float]] = {}
 PDF_RESOLVE_RATE_BUCKETS: dict[str, list[float]] = {}
+LITERATURE_SEARCH_RATE_BUCKETS: dict[str, list[float]] = {}
 TRUSTED_OA_PDF_HOST_SUFFIXES = (
     "arxiv.org",
     "biorxiv.org",
@@ -118,6 +119,20 @@ class WechatAdminConfig(BaseModel):
     digestPrefix: str = Field(default="研域前沿综述")
 
 
+class LiteratureSearchCdkConfig(BaseModel):
+    id: str = Field(default="")
+    name: str = Field(default="")
+    code: str = Field(default="")
+    enabled: bool = True
+    maxUses: int = Field(default=50, ge=1, le=100000)
+    usedCount: int = Field(default=0, ge=0)
+    expiresAt: str | None = None
+    paperCountMax: int = Field(default=100, ge=5, le=200)
+    literatureProvider: LiteratureProvider | None = None
+    paperSearchSources: list[str] = Field(default_factory=list)
+    note: str = Field(default="")
+
+
 class ReviewTopicConfig(BaseModel):
     id: str = Field(default="")
     slug: str = Field(default="")
@@ -156,6 +171,8 @@ class DailyReviewConfig(BaseModel):
     image: ImageAdminConfig = Field(default_factory=ImageAdminConfig)
     wechat: WechatAdminConfig = Field(default_factory=WechatAdminConfig)
     exclusiveAccessKey: str = Field(default="")
+    literatureSearchCdk: str = Field(default="")
+    literatureSearchCdks: list[LiteratureSearchCdkConfig] = Field(default_factory=list)
     activeTopicId: str = "general-ai-research"
     topics: list[ReviewTopicConfig] = Field(default_factory=list)
 
@@ -167,6 +184,7 @@ class DailyReviewConfigView(DailyReviewConfig):
     imageKeyConfigured: bool = False
     wechatSecretConfigured: bool = False
     exclusiveAccessKeyConfigured: bool = False
+    literatureSearchCdkConfigured: bool = False
 
 
 class ConnectionTestResult(BaseModel):
@@ -185,6 +203,40 @@ class DailyReviewRunRequest(BaseModel):
     freshnessBoost: Freshness | None = None
     includeFullText: bool | None = None
     includeWeb: bool | None = None
+
+
+class LiteratureOnlySearchRequest(BaseModel):
+    topic: str = Field(min_length=2, max_length=300)
+    paperCount: int = Field(default=50, ge=5, le=200)
+    sinceYear: int | None = Field(default=None, ge=1900, le=2100)
+    literatureProvider: LiteratureProvider | None = None
+    paperSearchSources: list[str] | None = None
+    cdk: str | None = None
+    llm: LlmAdminConfig | None = None
+
+
+class LiteratureCdkStatusRequest(BaseModel):
+    cdk: str = Field(min_length=1, max_length=300)
+
+
+class LiteratureCdkStatusResult(BaseModel):
+    ok: bool
+    cdk: dict[str, Any] | None = None
+    message: str
+
+
+class LiteratureOnlySearchResult(BaseModel):
+    ok: bool
+    topic: str
+    requested: int
+    returned: int
+    sinceYear: int
+    literatureProvider: LiteratureProvider
+    paperSearchSources: list[str]
+    llmSearchQueries: list[str]
+    searchExpression: str
+    cdk: dict[str, Any] | None = None
+    papers: list[dict[str, Any]]
 
 
 class AdminLoginRequest(BaseModel):
@@ -708,6 +760,35 @@ def _ensure_topics(config: DailyReviewConfig) -> DailyReviewConfig:
     if not config.wechat.digestPrefix or _looks_mojibake(config.wechat.digestPrefix) or config.wechat.digestPrefix.count("?") >= 3:
         config.wechat.digestPrefix = "研域前沿综述"
     config.wechat.sourceUrlBase = (config.wechat.sourceUrlBase or "").strip()
+    if config.literatureSearchCdk and not config.literatureSearchCdks:
+        config.literatureSearchCdks = [
+            LiteratureSearchCdkConfig(
+                id="default",
+                name="默认文献检索 CDK",
+                code=config.literatureSearchCdk,
+                maxUses=1000,
+                paperCountMax=100,
+            )
+        ]
+    normalized_cdks: list[LiteratureSearchCdkConfig] = []
+    seen_cdk_ids: set[str] = set()
+    for index, cdk in enumerate(config.literatureSearchCdks or []):
+        cdk.code = _usable_secret_override(cdk.code)
+        if not cdk.code:
+            continue
+        cdk.id = (cdk.id or _hash_text(cdk.code, 12) or f"cdk-{index + 1}").strip()
+        original_cdk_id = cdk.id
+        suffix = 2
+        while cdk.id in seen_cdk_ids:
+            cdk.id = f"{original_cdk_id}-{suffix}"
+            suffix += 1
+        seen_cdk_ids.add(cdk.id)
+        cdk.name = _clean_text(cdk.name) or f"文献检索 CDK {index + 1}"
+        cdk.paperSearchSources = _normalize_paper_search_sources(cdk.paperSearchSources) if cdk.paperSearchSources else []
+        if cdk.literatureProvider not in {"sciverse", "paper_search", "hybrid", None}:
+            cdk.literatureProvider = None
+        normalized_cdks.append(cdk)
+    config.literatureSearchCdks = normalized_cdks
     return config
 
 
@@ -824,6 +905,10 @@ def _check_pdf_resolve_rate_limit(request: Request) -> None:
     _check_rate_limit(PDF_RESOLVE_RATE_BUCKETS, _client_key(request), 60, "PDF_RESOLVE_RATE_LIMITED", "开放 PDF 查询过于频繁，请稍后再试")
 
 
+def _check_literature_search_rate_limit(request: Request) -> None:
+    _check_rate_limit(LITERATURE_SEARCH_RATE_BUCKETS, _client_key(request), 12, "LITERATURE_SEARCH_RATE_LIMITED", "文献检索请求过于频繁，请稍后再试")
+
+
 def _check_admin_login_rate_limit(request: Request) -> None:
     _check_rate_limit(ADMIN_LOGIN_RATE_BUCKETS, _client_key(request), max(1, settings.admin_login_rate_limit_per_minute), "ADMIN_LOGIN_RATE_LIMITED", "登录尝试过于频繁，请稍后再试")
 
@@ -856,12 +941,14 @@ def _view_config(config: DailyReviewConfig) -> DailyReviewConfigView:
     data["imageKeyConfigured"] = bool(config.image.apiKey.strip())
     data["wechatSecretConfigured"] = bool(config.wechat.appSecret.strip())
     data["exclusiveAccessKeyConfigured"] = bool(config.exclusiveAccessKey.strip())
+    data["literatureSearchCdkConfigured"] = bool(config.literatureSearchCdks or config.literatureSearchCdk.strip())
     data["sciverseApiToken"] = _mask(config.sciverseApiToken)
     data["llm"]["apiKey"] = _mask(config.llm.apiKey)
     data["translation"]["apiKey"] = _mask(config.translation.apiKey)
     data["image"]["apiKey"] = _mask(config.image.apiKey)
     data["wechat"]["appSecret"] = _mask(config.wechat.appSecret)
     data["exclusiveAccessKey"] = _mask(config.exclusiveAccessKey)
+    data["literatureSearchCdk"] = _mask(config.literatureSearchCdk)
     return DailyReviewConfigView(**data)
 
 
@@ -899,6 +986,12 @@ def _with_resolved_secrets(body: DailyReviewConfig) -> DailyReviewConfig:
     body.image.apiKey = _merge_secret(body.image.apiKey, old.image.apiKey)
     body.wechat.appSecret = _merge_secret(body.wechat.appSecret, old.wechat.appSecret)
     body.exclusiveAccessKey = _merge_secret(body.exclusiveAccessKey, old.exclusiveAccessKey)
+    body.literatureSearchCdk = _merge_secret(body.literatureSearchCdk, old.literatureSearchCdk)
+    old_cdks = {cdk.id: cdk for cdk in old.literatureSearchCdks}
+    for cdk in body.literatureSearchCdks:
+        old_cdk = old_cdks.get(cdk.id)
+        if old_cdk:
+            cdk.code = _merge_secret(cdk.code, old_cdk.code)
     return _ensure_topics(body)
 
 
@@ -945,6 +1038,68 @@ def _require_exclusive_access(config: DailyReviewConfig, request: Request) -> No
     provided = _exclusive_access_key(request)
     if not expected or not provided or not hmac.compare_digest(provided, expected):
         raise ApiError(401, "EXCLUSIVE_ACCESS_REQUIRED", "专属综述访问密钥无效")
+
+
+def _parse_beijing_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=BEIJING_TZ)
+    return parsed.astimezone(BEIJING_TZ)
+
+
+def _find_valid_literature_cdk(config: DailyReviewConfig, code: str) -> LiteratureSearchCdkConfig | None:
+    provided = _usable_secret_override(code)
+    if not provided:
+        return None
+    for cdk in _ensure_topics(config).literatureSearchCdks:
+        if not cdk.enabled or not cdk.code:
+            continue
+        if not hmac.compare_digest(provided, cdk.code):
+            continue
+        expires_at = _parse_beijing_datetime(cdk.expiresAt)
+        if expires_at and datetime.now(BEIJING_TZ) > expires_at:
+            return None
+        if cdk.usedCount >= cdk.maxUses:
+            return None
+        return cdk
+    return None
+
+
+def _literature_cdk_public_info(cdk: LiteratureSearchCdkConfig | None) -> dict[str, Any] | None:
+    if not cdk:
+        return None
+    remaining = max(0, cdk.maxUses - cdk.usedCount)
+    return {
+        "id": cdk.id,
+        "name": cdk.name,
+        "enabled": cdk.enabled,
+        "maxUses": cdk.maxUses,
+        "usedCount": cdk.usedCount,
+        "remainingUses": remaining,
+        "expiresAt": cdk.expiresAt,
+        "paperCountMax": cdk.paperCountMax,
+        "literatureProvider": cdk.literatureProvider,
+        "paperSearchSources": cdk.paperSearchSources,
+        "note": cdk.note,
+    }
+
+
+def _consume_literature_cdk(config: DailyReviewConfig, cdk_id: str | None) -> None:
+    if not cdk_id:
+        return
+    for cdk in config.literatureSearchCdks:
+        if cdk.id == cdk_id:
+            cdk.usedCount += 1
+            _save_config(config)
+            return
 
 
 def _is_exclusive_topic(topic: ReviewTopicConfig) -> bool:
@@ -1058,6 +1213,16 @@ def _llm_from_config(request: Request, config: DailyReviewConfig):
 
 def _llm_from_admin_config(config: DailyReviewConfig):
     return get_llm_client(config.llm.apiKey, base_url=config.llm.baseUrl, model=config.llm.model)
+
+
+def _llm_from_literature_search_request(body: LiteratureOnlySearchRequest, config: DailyReviewConfig):
+    llm = body.llm
+    if llm and _usable_secret_override(llm.apiKey) and llm.baseUrl.strip() and llm.model.strip():
+        return get_llm_client(llm.apiKey, base_url=llm.baseUrl, model=llm.model)
+    cdk = _find_valid_literature_cdk(config, body.cdk or "")
+    if cdk:
+        return _llm_from_admin_config(config)
+    raise ApiError(400, "LITERATURE_SEARCH_LLM_REQUIRED", "请输入可用 CDK，或填写自己的 OpenAI 兼容 LLM 配置")
 
 
 def _translation_llm_from_config(config: DailyReviewConfig):
@@ -2371,15 +2536,38 @@ async def _validate_paper_links(papers: list[dict[str, Any]], progress: Progress
 
 
 def _search_query(topic: str) -> str:
-    return topic.strip()
+    return _repair_mojibake(_clean_text(topic)).strip()
+
+
+def _invalid_search_query(query: str) -> bool:
+    text = _clean_text(query).strip()
+    lowered = text.lower()
+    if not text:
+        return True
+    if text.count("?") >= max(3, len(text) // 4):
+        return True
+    blocked_markers = (
+        "topic missing",
+        "garbled",
+        "please provide",
+        "provide specific",
+        "请提供",
+        "具体研究主题",
+        "主题缺失",
+    )
+    return any(marker in lowered for marker in blocked_markers)
 
 
 def _search_candidates(topic: str, extra_queries: list[str] | None = None) -> list[str]:
-    candidates: list[str] = [topic.strip(), _search_query(topic)]
+    repaired_topic = _search_query(topic)
+    candidates: list[str] = [repaired_topic]
     candidates.extend(extra_queries or [])
     out: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
+        candidate = _repair_mojibake(_clean_text(candidate))
+        if _invalid_search_query(candidate):
+            continue
         key = candidate.strip().lower()
         if key and key not in seen:
             seen.add(key)
@@ -2388,6 +2576,48 @@ def _search_candidates(topic: str, extra_queries: list[str] | None = None) -> li
 
 
 ProgressCallback = Callable[[str, str, int, int, int | None, Literal["determinate", "indeterminate"], str | None], None]
+
+
+async def _expand_search_queries_with_clean_prompt(
+    llm: Any,
+    topic: str,
+    progress: ProgressCallback | None = None,
+) -> list[str]:
+    topic = _repair_mojibake(_clean_text(topic))
+    if _invalid_search_query(topic):
+        return []
+    if progress:
+        progress("检索扩展", "正在生成中英文高质量检索式", 3, 0, None, "indeterminate", "用于覆盖不同语言的高质量期刊文献")
+    try:
+        text = await llm.complete(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You generate concise academic literature search queries. "
+                        "Return only a JSON array of strings. Do not ask questions."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Research topic: {topic}\n\n"
+                        "Generate 4-8 academic search queries for scholarly databases. Requirements:\n"
+                        "1. Stay tightly focused on the topic and avoid unrelated broad fields.\n"
+                        "2. Prefer high-quality international journal terminology in English; keep key Chinese terms, abbreviations, material names, and method names when useful.\n"
+                        "3. Keep each query short and suitable for Semantic Scholar, OpenAlex, Crossref, Europe PMC, HAL, BASE, CORE, and Sciverse.\n"
+                        "4. Avoid one-word or overly broad queries such as AI, design, degradation, 3D.\n"
+                        "5. Output only a JSON array of strings."
+                    ),
+                },
+            ],
+            temperature=0,
+            max_tokens=1000,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("LLM search query expansion failed: %s", exc)
+        return []
+    return _parse_search_query_lines(text)
 
 
 def _parse_search_query_lines(text: str) -> list[str]:
@@ -2411,7 +2641,7 @@ def _parse_search_query_lines(text: str) -> list[str]:
         if query.count('"') % 2 == 1:
             query = query.replace('"', "")
         key = query.lower()
-        if 4 <= len(query) <= 220 and key not in seen and not _looks_mojibake(query):
+        if 4 <= len(query) <= 220 and key not in seen and not _looks_mojibake(query) and not _invalid_search_query(query):
             seen.add(key)
             out.append(query)
     return out[:8]
@@ -4446,6 +4676,80 @@ async def get_run(run_id: str):
     return {"result": await _ensure_run_image_local(run, config)}
 
 
+@router.post("/literature-cdk/status", response_model=LiteratureCdkStatusResult)
+async def get_literature_cdk_status(body: LiteratureCdkStatusRequest, request: Request):
+    _check_literature_search_rate_limit(request)
+    config = _load_config()
+    cdk = _find_valid_literature_cdk(config, body.cdk)
+    if not cdk:
+        return LiteratureCdkStatusResult(ok=False, cdk=None, message="CDK 不存在、已停用、已过期或次数已用完")
+    return LiteratureCdkStatusResult(ok=True, cdk=_literature_cdk_public_info(cdk), message="CDK 可用")
+
+
+@router.post("/literature-search", response_model=LiteratureOnlySearchResult)
+async def search_literature_only(body: LiteratureOnlySearchRequest, request: Request):
+    _check_literature_search_rate_limit(request)
+    config = _load_config()
+    cdk = _find_valid_literature_cdk(config, body.cdk or "")
+    has_own_llm = bool(
+        body.llm
+        and _usable_secret_override(body.llm.apiKey)
+        and body.llm.baseUrl.strip()
+        and body.llm.model.strip()
+    )
+    if not cdk and not has_own_llm:
+        raise ApiError(400, "LITERATURE_SEARCH_LLM_REQUIRED", "请输入可用 CDK，或填写自己的 OpenAI 兼容 LLM 配置")
+    requested_count = min(body.paperCount, cdk.paperCountMax if cdk else 200)
+    topic = _clean_text(body.topic)
+    if not topic:
+        raise ApiError(400, "TOPIC_REQUIRED", "请输入检索主题")
+    since_year = body.sinceYear or max(1900, datetime.now(BEIJING_TZ).year - 10)
+    provider = body.literatureProvider or (cdk.literatureProvider if cdk and cdk.literatureProvider else config.literatureProvider)
+    if provider not in {"sciverse", "paper_search", "hybrid"}:
+        provider = config.literatureProvider
+    paper_sources = _normalize_paper_search_sources(
+        body.paperSearchSources or (cdk.paperSearchSources if cdk and cdk.paperSearchSources else config.paperSearchSources)
+    )
+    llm = _llm_from_literature_search_request(body, config)
+    extra_queries = await _expand_search_queries_with_clean_prompt(llm, topic)
+    fields = [
+        "title", "doi", "author", "publication_published_year", "publication_published_date",
+        "publication_venue_name_unified", "citation_count", "influential_citation_count", "fwci",
+        "doc_id", "unique_id", "abstract", "access_oa_url",
+    ]
+    papers, _meta, search_expression = await _collect_papers(
+        _sciverse_from_config(request, config),
+        topic,
+        requested_count,
+        since_year,
+        "STRONG",
+        fields,
+        provider=provider,
+        paper_search_sources=paper_sources,
+        extra_queries=extra_queries,
+    )
+    dynamic_terms = _dynamic_topic_terms(topic, extra_queries)
+    papers = _rank_quality_papers(_dedupe(papers), allow_weak=True, topic=topic, dynamic_terms=dynamic_terms)[:requested_count]
+    if settings.paper_search_validate_links:
+        papers = await _validate_paper_links(papers)
+    _annotate_evidence_scores(papers, topic, dynamic_terms, {})
+    _consume_literature_cdk(config, cdk.id if cdk and not has_own_llm else None)
+    fresh_cdk = _find_valid_literature_cdk(_load_config(), body.cdk or "") if cdk else None
+    return LiteratureOnlySearchResult(
+        ok=bool(papers),
+        topic=topic,
+        requested=requested_count,
+        returned=len(papers),
+        sinceYear=since_year,
+        literatureProvider=provider,
+        paperSearchSources=paper_sources,
+        llmSearchQueries=extra_queries,
+        searchExpression=search_expression,
+        cdk=_literature_cdk_public_info(fresh_cdk or cdk),
+        papers=papers,
+    )
+
+
 @router.post("/pdf", response_model=PdfResolveResult)
 async def resolve_open_pdf(body: PdfResolveRequest, request: Request):
     _check_pdf_resolve_rate_limit(request)
@@ -4985,7 +5289,7 @@ async def _run_review(config: DailyReviewConfig, body: DailyReviewRunRequest, sc
             "publication_venue_name_unified", "citation_count", "influential_citation_count", "fwci",
             "doc_id", "unique_id", "abstract", "access_oa_url",
         ]
-        extra_queries = await _expand_search_queries_with_llm(llm, topic, progress=progress)
+        extra_queries = await _expand_search_queries_with_clean_prompt(llm, topic, progress=progress)
         draft["query"]["llmSearchQueries"] = extra_queries
         draft["stage"] = "search_plan"
         _save_draft(draft)
@@ -5162,7 +5466,7 @@ async def smoke_search(body: SmokeRequest, request: Request):
     topic = (body.topic or topic_config.topic).strip()
     since_year = body.sinceYear or topic_config.sinceYear
     freshness = body.freshnessBoost or topic_config.freshnessBoost
-    extra_queries = await _expand_search_queries_with_llm(_llm_from_config(request, config), topic)
+    extra_queries = await _expand_search_queries_with_clean_prompt(_llm_from_config(request, config), topic)
     fields = [
         "title", "doi", "author", "publication_published_year", "publication_published_date",
         "publication_venue_name_unified", "citation_count", "influential_citation_count", "fwci",

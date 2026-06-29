@@ -23,6 +23,8 @@
 - Hybrid 文献检索：支持 Sciverse 与 Paper Search HTTP 适配源合并检索，参考 paper-search-mcp 的多源检索组织方式。
 - 多源字段标准化：对 Semantic Scholar、OpenAlex、Crossref、Europe PMC、HAL、BASE、CORE、Unpaywall、Sciverse 等来源做字段对齐。
 - 文献去重融合：按 DOI、标题、uniqueId、docId 等字段去重，并融合来源、摘要、PDF 线索和引用指标。
+- 只检索文献入口：公开 `/literature-search` 页面支持用户输入主题和文献数量，只返回检索与评分后的文献证据，不生成完整综述。
+- 管理员 CDK：管理员可为公开文献检索生成 CDK，独立控制启停、最大使用次数、过期时间、单次最大文献数和可用检索源。
 - 证据质量评分：每篇证据展示相关性、文献质量、证据完整度和新颖度。
 - Daily Delta 策略：根据本主题历史文献索引自动判断本期写作模式。
 - 动态小标题：结合主题、子议题池、近期历史和候选文献生成本期小标题。
@@ -35,7 +37,7 @@
 - 微信公众号模块：将平台日报转换为适合公众号阅读的科研图文，并创建微信公众号草稿。
 - 失败暂存与继续：检索和证据增强后的中间状态会保存到 drafts，LLM 或生图失败后可继续。
 - 北京时间调度：定时任务统一基于北京时间。
-- 多主题并发调度：支持配置同一时刻多个主题的并发执行数量。
+- 北京时间调度：默认一次只运行一个主题，降低 LLM 上游拥塞风险；如确有需要，可通过环境变量调整并发数。
 
 ## 技术栈
 
@@ -125,6 +127,7 @@ LLM_MAX_RETRIES=3
 DAILY_REVIEW_LITERATURE_PROVIDER=hybrid
 PAPER_SEARCH_SOURCES=semantic,openalex,crossref,europepmc,hal,base,core,unpaywall
 PAPER_SEARCH_VALIDATE_LINKS=true
+DAILY_REVIEW_SCHEDULER_CONCURRENCY=1
 
 UNPAYWALL_EMAIL=your-email@example.com
 OPENALEX_MAILTO=your-email@example.com

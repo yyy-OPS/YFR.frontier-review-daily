@@ -265,8 +265,25 @@ export interface DailyReviewConfig {
   wechatSecretConfigured?: boolean;
   exclusiveAccessKey: string;
   exclusiveAccessKeyConfigured?: boolean;
+  literatureSearchCdk?: string;
+  literatureSearchCdkConfigured?: boolean;
+  literatureSearchCdks?: LiteratureSearchCdkConfig[];
   activeTopicId: string;
   topics: ReviewTopicConfig[];
+}
+
+export interface LiteratureSearchCdkConfig {
+  id: string;
+  name: string;
+  code: string;
+  enabled: boolean;
+  maxUses: number;
+  usedCount: number;
+  expiresAt?: string | null;
+  paperCountMax: number;
+  literatureProvider?: "sciverse" | "paper_search" | "hybrid" | null;
+  paperSearchSources?: string[];
+  note?: string;
 }
 
 export interface DailyReviewPaper {
@@ -318,6 +335,50 @@ export interface DailyReviewPaper {
   pdfStatus?: string | null;
   openAccessPdf?: boolean | null;
   evidenceSource?: "abstract" | "fulltext" | string | null;
+}
+
+export interface LiteratureCdkPublicInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
+  maxUses: number;
+  usedCount: number;
+  remainingUses: number;
+  expiresAt?: string | null;
+  paperCountMax: number;
+  literatureProvider?: "sciverse" | "paper_search" | "hybrid" | null;
+  paperSearchSources?: string[];
+  note?: string | null;
+}
+
+export interface LiteratureOnlySearchRequest {
+  topic: string;
+  paperCount: number;
+  sinceYear?: number | null;
+  literatureProvider?: "sciverse" | "paper_search" | "hybrid" | null;
+  paperSearchSources?: string[] | null;
+  cdk?: string | null;
+  llm?: {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    temperature?: number;
+    maxTokens?: number;
+  } | null;
+}
+
+export interface LiteratureOnlySearchResult {
+  ok: boolean;
+  topic: string;
+  requested: number;
+  returned: number;
+  sinceYear: number;
+  literatureProvider: "sciverse" | "paper_search" | "hybrid";
+  paperSearchSources: string[];
+  llmSearchQueries: string[];
+  searchExpression: string;
+  cdk?: LiteratureCdkPublicInfo | null;
+  papers: DailyReviewPaper[];
 }
 
 export interface DailyReviewPdfResolveResult {
@@ -599,6 +660,26 @@ export async function getDailyReviewAdminRuns(limit = 80, adminToken?: string): 
 export async function getDailyReviewRun(runId: string): Promise<{ result: DailyReviewRunResult }> {
   return handle<{ result: DailyReviewRunResult }>(
     await doFetch(`${BASE}/daily-review/runs/${enc(runId)}`),
+  );
+}
+
+export async function getLiteratureCdkStatus(cdk: string): Promise<{ ok: boolean; cdk?: LiteratureCdkPublicInfo | null; message: string }> {
+  return handle<{ ok: boolean; cdk?: LiteratureCdkPublicInfo | null; message: string }>(
+    await doFetch(`${BASE}/daily-review/literature-cdk/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cdk }),
+    }),
+  );
+}
+
+export async function searchLiteratureOnly(body: LiteratureOnlySearchRequest): Promise<LiteratureOnlySearchResult> {
+  return handle<LiteratureOnlySearchResult>(
+    await doFetch(`${BASE}/daily-review/literature-search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   );
 }
 
