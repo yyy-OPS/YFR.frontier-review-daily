@@ -482,6 +482,7 @@ _RUN_PROGRESS: dict[str, dict[str, Any]] = {}
 _RUN_TASKS: dict[str, asyncio.Task] = {}
 _LITERATURE_SEARCH_PROGRESS: dict[str, dict[str, Any]] = {}
 _LITERATURE_SEARCH_TASKS: dict[str, asyncio.Task] = {}
+_CDK_USAGE_LOCK = asyncio.Lock()
 
 
 def _config_path() -> Path:
@@ -1205,14 +1206,17 @@ def _literature_cdk_public_info(cdk: LiteratureSearchCdkConfig | None) -> dict[s
     }
 
 
-def _consume_literature_cdk(config: DailyReviewConfig, cdk_id: str | None) -> None:
+async def _consume_literature_cdk(cdk_id: str | None) -> LiteratureSearchCdkConfig | None:
     if not cdk_id:
-        return
-    for cdk in config.literatureSearchCdks:
-        if cdk.id == cdk_id:
-            cdk.usedCount += 1
-            _save_config(config)
-            return
+        return None
+    async with _CDK_USAGE_LOCK:
+        config = _load_config()
+        for cdk in config.literatureSearchCdks:
+            if cdk.id == cdk_id:
+                cdk.usedCount += 1
+                _save_config(config)
+                return cdk
+    return None
 
 
 def _is_exclusive_topic(topic: ReviewTopicConfig) -> bool:
@@ -5027,8 +5031,6 @@ async def _execute_literature_search(
     if settings.paper_search_validate_links:
         papers = await _validate_paper_links(papers, progress=progress)
     _annotate_evidence_scores(papers, topic, dynamic_terms, {})
-    _consume_literature_cdk(config, cdk.id if cdk and not has_own_llm else None)
-    fresh_cdk = _find_valid_literature_cdk(_load_config(), body.cdk or "") if cdk else None
     created_at = datetime.now(timezone.utc).isoformat()
     if progress:
         progress("完成", f"已返回 {len(papers)} 篇文献", 100, len(papers), requested_count, "determinate", "结果已持久化")
@@ -5047,9 +5049,14 @@ async def _execute_literature_search(
         searchExpression=search_expression,
         cdkId=cdk.id if cdk else None,
         cdkName=cdk.name if cdk else None,
-        cdk=_literature_cdk_public_info(fresh_cdk or cdk),
+        cdk=_literature_cdk_public_info(cdk),
         papers=papers,
     )
+
+
+def _literature_search_uses_cdk(body: LiteratureOnlySearchRequest, result: LiteratureOnlySearchResult) -> bool:
+    own_llm = body.llm and _usable_secret_override(body.llm.apiKey) and body.llm.baseUrl.strip() and body.llm.model.strip()
+    return bool(result.cdkId and not own_llm)
 
 
 @router.post("/literature-search", response_model=LiteratureOnlySearchResult)
@@ -5058,6 +5065,11 @@ async def search_literature_only(body: LiteratureOnlySearchRequest, request: Req
     search_id = _new_literature_search_id(body.topic)
     result = await _execute_literature_search(body, request.app, request=request, search_id=search_id)
     _save_literature_search_payload(search_id, result=result.model_dump())
+    if _literature_search_uses_cdk(body, result):
+        consumed = await _consume_literature_cdk(result.cdkId)
+        if consumed:
+            result.cdk = _literature_cdk_public_info(consumed)
+            _save_literature_search_payload(search_id, result=result.model_dump())
     return result
 
 
@@ -5103,6 +5115,11 @@ async def search_literature_only_async(body: LiteratureOnlySearchRequest, reques
         try:
             result = await _execute_literature_search(body, app, request=None, search_id=search_id, progress=progress)
             _save_literature_search_payload(search_id, result=result.model_dump())
+            if _literature_search_uses_cdk(body, result):
+                consumed = await _consume_literature_cdk(result.cdkId)
+                if consumed:
+                    result.cdk = _literature_cdk_public_info(consumed)
+                    _save_literature_search_payload(search_id, result=result.model_dump())
             _set_literature_search_progress(
                 search_id,
                 status="success",
