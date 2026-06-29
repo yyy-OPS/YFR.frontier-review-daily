@@ -4,6 +4,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY apps/web/package.json apps/web/pnpm-lock.yaml* ./
 RUN pnpm install --no-frozen-lockfile
 COPY apps/web/ ./
+RUN rm -f pnpm-workspace.yaml
 ARG VITE_API_BASE=/api
 ENV VITE_API_BASE=$VITE_API_BASE
 RUN pnpm run build

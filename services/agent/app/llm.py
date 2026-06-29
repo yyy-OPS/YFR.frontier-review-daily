@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import socket
 from typing import AsyncIterator, Protocol
 from urllib.parse import urlparse
 
@@ -13,6 +14,32 @@ from .config import settings
 
 class LLMError(Exception):
     pass
+
+
+def _llm_http_error(status_code: int, detail: str) -> LLMError:
+    compact = " ".join((detail or "").split())[:400]
+    lowered = compact.lower()
+    if status_code in {401, 403} and any(marker in lowered for marker in ("insufficient_balance", "insufficient account balance", "quota", "billing", "余额不足")):
+        return LLMError(f"LLM 账户余额不足或额度不可用：请充值或在后台更换可用 API Key 后重试。上游返回 {status_code}: {compact}")
+    if status_code in {401, 403} and any(marker in lowered for marker in ("invalid api key", "authentication", "unauthorized", "forbidden", "无效", "认证")):
+        return LLMError(f"LLM API Key 无效或上游认证失败：请检查 Base URL、API Key 和模型权限。上游返回 {status_code}: {compact}")
+    if status_code == 429:
+        return LLMError(f"LLM 请求被限流或额度达到上限：请稍后重试或更换可用模型。上游返回 {status_code}: {compact}")
+    return LLMError(f"LLM API error {status_code}: {compact}")
+
+
+def _llm_network_error(exc: httpx.HTTPError) -> LLMError:
+    if isinstance(exc, httpx.TimeoutException):
+        timeout = getattr(settings, "llm_timeout_seconds", 900)
+        return LLMError(f"LLM 请求超时：后端在 {timeout} 秒内没有完整收到上游响应。长综述建议启用流式聚合或继续增大 LLM_TIMEOUT_SECONDS。")
+    if isinstance(exc, httpx.ConnectError):
+        cause = exc.__cause__
+        if isinstance(cause, socket.gaierror):
+            return LLMError(f"LLM DNS resolution failed: {cause}")
+        return LLMError(f"LLM connection failed: {exc}")
+    if isinstance(exc, httpx.RemoteProtocolError):
+        return LLMError(f"LLM upstream connection interrupted: {exc}")
+    return LLMError(f"LLM service unreachable: {exc}")
 
 
 class LLMClient(Protocol):
@@ -36,6 +63,12 @@ class OpenAICompatibleClient:
         self.base_url = _normalize_openai_base_url(base_url)
         self.model = model
         self.max_retries = int(getattr(settings, "llm_max_retries", 3))
+        self.timeout = float(getattr(settings, "llm_timeout_seconds", 900.0))
+        self.connect_timeout = float(getattr(settings, "llm_connect_timeout_seconds", 20.0))
+        self.complete_use_stream = bool(getattr(settings, "llm_complete_use_stream", True))
+
+    def _timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(self.timeout, connect=self.connect_timeout)
 
     async def stream(self, messages: list[dict], temperature: float = 0.3, max_tokens: int = 2048, json_mode: bool = False) -> AsyncIterator[str]:
         body: dict = {
@@ -51,11 +84,11 @@ class OpenAICompatibleClient:
         last_error: LLMError | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
+                async with httpx.AsyncClient(timeout=self._timeout()) as client:
                     async with client.stream("POST", f"{self.base_url}/chat/completions", json=body, headers=headers) as res:
                         if res.status_code != 200:
                             detail = (await res.aread()).decode("utf-8", errors="ignore")[:400]
-                            error = LLMError(f"LLM API 错误 {res.status_code}: {detail}")
+                            error = _llm_http_error(res.status_code, detail)
                             if _should_retry_llm_error(res.status_code, detail) and attempt < self.max_retries:
                                 last_error = error
                                 await _sleep_before_retry(attempt)
@@ -75,7 +108,7 @@ class OpenAICompatibleClient:
                                 yield delta
                         return
             except httpx.HTTPError as exc:
-                last_error = LLMError(f"LLM 服务不可达: {exc}")
+                last_error = _llm_network_error(exc)
                 if attempt < self.max_retries:
                     await _sleep_before_retry(attempt)
                     continue
@@ -84,6 +117,11 @@ class OpenAICompatibleClient:
             raise last_error
 
     async def complete(self, messages: list[dict], temperature: float = 0.3, max_tokens: int = 2048, json_mode: bool = False) -> str:
+        if self.complete_use_stream and not json_mode:
+            parts: list[str] = []
+            async for token in self.stream(messages, temperature=temperature, max_tokens=max_tokens, json_mode=False):
+                parts.append(token)
+            return "".join(parts).strip()
         body: dict = {
             "model": self.model,
             "messages": messages,
@@ -97,10 +135,10 @@ class OpenAICompatibleClient:
         last_error: LLMError | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
+                async with httpx.AsyncClient(timeout=self._timeout()) as client:
                     res = await client.post(f"{self.base_url}/chat/completions", json=body, headers=headers)
                 if res.status_code != 200:
-                    error = LLMError(f"LLM API 错误 {res.status_code}: {res.text[:400]}")
+                    error = _llm_http_error(res.status_code, res.text)
                     if _should_retry_llm_error(res.status_code, res.text) and attempt < self.max_retries:
                         last_error = error
                         await _sleep_before_retry(attempt)
@@ -109,13 +147,13 @@ class OpenAICompatibleClient:
                 data = res.json()
                 return str(data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
             except httpx.HTTPError as exc:
-                last_error = LLMError(f"LLM 服务不可达: {exc}")
+                last_error = _llm_network_error(exc)
                 if attempt < self.max_retries:
                     await _sleep_before_retry(attempt)
                     continue
                 raise last_error from exc
             except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
-                raise LLMError(f"LLM 返回格式异常: {exc}") from exc
+                raise LLMError(f"LLM response parse error: {exc}") from exc
         if last_error:
             raise last_error
         return ""

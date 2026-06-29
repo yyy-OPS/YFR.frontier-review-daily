@@ -26,6 +26,8 @@ server {
   index index.html;
 
   client_max_body_size 50m;
+  access_log /dev/stdout;
+  error_log /dev/stderr warn;
 
   location /api/ {
     proxy_pass http://127.0.0.1:8000/;
@@ -34,8 +36,10 @@ server {
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Request-ID \$request_id;
     proxy_read_timeout 900s;
     proxy_send_timeout 900s;
+    proxy_connect_timeout 30s;
   }
 
   location / {

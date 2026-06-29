@@ -122,6 +122,9 @@ OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
 OPENAI_API_KEY=replace-with-your-key
 OPENAI_MODEL=your-model-name
 LLM_MAX_RETRIES=3
+LLM_TIMEOUT_SECONDS=900
+LLM_CONNECT_TIMEOUT_SECONDS=20
+LLM_COMPLETE_USE_STREAM=true
 
 DAILY_REVIEW_LITERATURE_PROVIDER=hybrid
 PAPER_SEARCH_SOURCES=semantic,openalex,crossref,europepmc,hal,base,core,unpaywall

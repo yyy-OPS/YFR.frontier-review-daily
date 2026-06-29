@@ -181,7 +181,7 @@ export function CdkAdminPage() {
     setSaving(true);
     setError("");
     try {
-      const saved = await saveDailyReviewConfig(config, adminToken);
+      const saved = await saveDailyReviewConfig(config, adminToken, "cdks");
       setConfig(saved);
       setStatus("CDK 配置已保存。");
     } catch (e) {

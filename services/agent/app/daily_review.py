@@ -488,6 +488,10 @@ def _config_path() -> Path:
     return _data_path("daily_review_config.json")
 
 
+def _config_backup_path() -> Path:
+    return _config_path().with_name(f"{_config_path().name}.bak")
+
+
 def _runs_path() -> Path:
     return _data_path("daily_review_runs.jsonl")
 
@@ -868,13 +872,26 @@ def _ensure_topics(config: DailyReviewConfig) -> DailyReviewConfig:
     return config
 
 
-def _load_config() -> DailyReviewConfig:
-    path = _config_path()
+def _read_config_file(path: Path) -> DailyReviewConfig | None:
     if path.exists():
         try:
             return _ensure_topics(DailyReviewConfig(**json.loads(path.read_text(encoding="utf-8"))))
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            pass
+            log.warning("failed to read daily review config: %s", path, exc_info=True)
+    return None
+
+
+def _load_config() -> DailyReviewConfig:
+    path = _config_path()
+    config = _read_config_file(path)
+    if config is not None:
+        return config
+    backup = _config_backup_path()
+    config = _read_config_file(backup)
+    if config is not None:
+        log.warning("daily review config recovered from backup: %s", backup)
+        _save_config(config)
+        return config
     return _ensure_topics(DailyReviewConfig(
         sciverseApiToken=settings.sciverse_api_token,
         llm=LlmAdminConfig(
@@ -887,7 +904,25 @@ def _load_config() -> DailyReviewConfig:
 
 def _save_config(config: DailyReviewConfig) -> None:
     config = _ensure_topics(config)
-    _config_path().write_text(json.dumps(config.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+    path = _config_path()
+    backup = _config_backup_path()
+    current = _read_config_file(path)
+    if current is not None:
+        try:
+            shutil.copy2(path, backup)
+        except OSError:
+            log.warning("failed to write daily review config backup: %s", backup, exc_info=True)
+    payload = json.dumps(config.model_dump(), ensure_ascii=False, indent=2)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            log.warning("failed to clean daily review config temp file: %s", tmp, exc_info=True)
 
 
 def _password_hash(password: str, salt: str) -> str:
@@ -1031,6 +1066,8 @@ def _view_config(config: DailyReviewConfig) -> DailyReviewConfigView:
 def _merge_secret(new_value: str, old_value: str) -> str:
     value = (new_value or "").strip()
     if not value:
+        return old_value
+    if value == "__CLEAR_SECRET__":
         return ""
     if old_value and ("*" in value or "..." in value) and value.endswith(old_value[-4:]):
         return old_value
@@ -2642,8 +2679,9 @@ def _invalid_search_query(query: str) -> bool:
 
 def _search_candidates(topic: str, extra_queries: list[str] | None = None) -> list[str]:
     repaired_topic = _search_query(topic)
-    candidates: list[str] = [repaired_topic]
+    candidates: list[str] = []
     candidates.extend(extra_queries or [])
+    candidates.append(repaired_topic)
     out: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -2698,8 +2736,11 @@ async def _expand_search_queries_with_clean_prompt(
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("LLM search query expansion failed: %s", exc)
-        return []
-    return _parse_search_query_lines(text)
+        raise ApiError(502, "SEARCH_QUERY_EXPANSION_FAILED", f"LLM 生成检索式失败：{exc}") from exc
+    queries = _parse_search_query_lines(text)
+    if not queries:
+        raise ApiError(502, "SEARCH_QUERY_EXPANSION_EMPTY", "LLM 未返回可用检索式，请检查模型能力或换用更稳定的模型。")
+    return queries
 
 
 def _parse_search_query_lines(text: str) -> list[str]:
@@ -4813,7 +4854,17 @@ async def get_config_view(request: Request):
 @router.put("/config", response_model=DailyReviewConfigView)
 async def put_config(body: DailyReviewConfig, request: Request):
     _require_admin(request)
-    _save_config(_with_resolved_secrets(body))
+    scope = request.headers.get("X-Daily-Review-Config-Scope", "general").strip().lower()
+    old = _load_config()
+    resolved = _with_resolved_secrets(body)
+    if scope == "cdks":
+        old.literatureSearchCdk = resolved.literatureSearchCdk
+        old.literatureSearchCdks = resolved.literatureSearchCdks
+        _save_config(old)
+    else:
+        resolved.literatureSearchCdk = old.literatureSearchCdk
+        resolved.literatureSearchCdks = old.literatureSearchCdks
+        _save_config(resolved)
     return _view_config(_load_config())
 
 
@@ -4823,10 +4874,10 @@ async def get_latest_run(topic: str | None = None):
     if not _is_public_topic_filter(config, topic):
         return {"result": None}
     if topic:
-        return {"result": await _ensure_run_image_local(_latest_run(topic), config)}
+        return {"result": _latest_run(topic)}
     for run in reversed(_iter_runs()):
         if _is_public_run(config, run):
-            return {"result": await _ensure_run_image_local(_ensure_run_evidence_scores(run), config)}
+            return {"result": _ensure_run_evidence_scores(run)}
     return {"result": None}
 
 
@@ -4853,10 +4904,10 @@ async def get_exclusive_latest_run(request: Request, topic: str | None = None):
         run = _latest_run(topic)
         if run is None or not _is_exclusive_run(config, run):
             return {"result": None}
-        return {"result": await _ensure_run_image_local(run, config)}
+        return {"result": run}
     for run in reversed(_iter_runs()):
         if _is_exclusive_run(config, run):
-            return {"result": await _ensure_run_image_local(_ensure_run_evidence_scores(run), config)}
+            return {"result": _ensure_run_evidence_scores(run)}
     return {"result": None}
 
 
@@ -4878,7 +4929,7 @@ async def get_exclusive_run(run_id: str, request: Request):
     run = _find_run(run_id)
     if run is None or not _is_exclusive_run(config, run):
         raise ApiError(404, "RUN_NOT_FOUND", "未找到该期专属综述")
-    return {"result": await _ensure_run_image_local(run, config)}
+    return {"result": run}
 
 
 @router.get("/history", response_model=DailyReviewHistoryResult)
@@ -4905,7 +4956,7 @@ async def get_run(run_id: str):
     run = _find_run(run_id)
     if run is None or not _is_public_run(config, run):
         raise ApiError(404, "RUN_NOT_FOUND", "未找到该期日报")
-    return {"result": await _ensure_run_image_local(run, config)}
+    return {"result": run}
 
 
 @router.post("/literature-cdk/status", response_model=LiteratureCdkStatusResult)
@@ -5221,11 +5272,16 @@ async def test_llm_connection(body: DailyReviewConfig, request: Request):
     if not config.llm.apiKey.strip():
         return ConnectionTestResult(ok=False, service="llm", message="LLM API Key 未配置")
     try:
-        text = await _llm_from_admin_config(config).complete(
-            [{"role": "system", "content": "You are a connectivity checker. Reply with exactly: OK"}, {"role": "user", "content": "OK"}],
-            temperature=0,
-            max_tokens=512,
+        text = await asyncio.wait_for(
+            _llm_from_admin_config(config).complete(
+                [{"role": "system", "content": "You are a connectivity checker. Reply with exactly: OK"}, {"role": "user", "content": "OK"}],
+                temperature=0,
+                max_tokens=16,
+            ),
+            timeout=35.0,
         )
+    except asyncio.TimeoutError:
+        return ConnectionTestResult(ok=False, service="llm", message="LLM request timeout", detail="LLM connectivity test did not finish within 35 seconds")
     except Exception as exc:  # noqa: BLE001
         return ConnectionTestResult(ok=False, service="llm", message="LLM 请求失败", detail=str(exc))
     return ConnectionTestResult(
@@ -5243,11 +5299,16 @@ async def test_translation_connection(body: DailyReviewConfig, request: Request)
     if not (config.translation.apiKey or config.llm.apiKey).strip():
         return ConnectionTestResult(ok=False, service="llm", message="翻译 LLM 未配置", detail="未配置时请直接使用浏览器翻译。")
     try:
-        text = await _translation_llm_from_config(config).complete(
-            [{"role": "system", "content": "You are a translation connectivity checker. Translate the phrase to Chinese only."}, {"role": "user", "content": "structural design"}],
-            temperature=0,
-            max_tokens=512,
+        text = await asyncio.wait_for(
+            _translation_llm_from_config(config).complete(
+                [{"role": "system", "content": "You are a translation connectivity checker. Translate the phrase to Chinese only."}, {"role": "user", "content": "structural design"}],
+                temperature=0,
+                max_tokens=32,
+            ),
+            timeout=35.0,
         )
+    except asyncio.TimeoutError:
+        return ConnectionTestResult(ok=False, service="llm", message="Translation LLM request timeout", detail="Translation connectivity test did not finish within 35 seconds")
     except Exception as exc:  # noqa: BLE001
         return ConnectionTestResult(ok=False, service="llm", message="翻译 LLM 请求失败", detail=str(exc))
     return ConnectionTestResult(
@@ -5924,4 +5985,3 @@ def _is_due(now: datetime, schedule_time: str, last_run: date | None) -> bool:
         return False
     hour, minute = int(match.group(1)), int(match.group(2))
     return last_run != now.date() and now.hour == hour and now.minute == minute
-

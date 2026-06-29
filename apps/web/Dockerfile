@@ -5,6 +5,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY package.json pnpm-lock.yaml* ./
 RUN pnpm install --no-frozen-lockfile
 COPY . .
+RUN rm -f pnpm-workspace.yaml
 # 注: schema.d.ts 已随源码提交 (无需在 docker 内访问仓库外的 contracts)
 ARG VITE_API_BASE=/api
 ENV VITE_API_BASE=$VITE_API_BASE

@@ -66,6 +66,53 @@ function withBase(input: string, base: string): string {
   return `${normalizedBase}${normalizedInput.startsWith("/") ? normalizedInput : `/${normalizedInput}`}`;
 }
 
+function isAbortLikeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || /signal is aborted|abort/i.test(error.message || "");
+}
+
+function normalizeNetworkMessage(error: unknown): string {
+  if (isAbortLikeError(error)) {
+    return "请求在后端响应前被中断，请重试；如果持续出现，请查看服务器请求日志。";
+  }
+  return error instanceof Error && error.message ? error.message : "无法连接后端服务";
+}
+
+function shouldRetryFetch(input: string, init?: RequestInit): boolean {
+  const method = (init?.method || "GET").toUpperCase();
+  if (method === "GET") return true;
+  return method === "POST" && input.includes("/daily-review/test/");
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+}
+
+function normalizeSecretForSave(value: string | undefined, configured?: boolean): string {
+  const secret = (value ?? "").trim();
+  if (!secret && configured) return "__CLEAR_SECRET__";
+  return value ?? "";
+}
+
+function normalizeConfigForSave(config: DailyReviewConfig): DailyReviewConfig {
+  return {
+    ...config,
+    sciverseApiToken: normalizeSecretForSave(config.sciverseApiToken, config.sciverseTokenConfigured),
+    exclusiveAccessKey: normalizeSecretForSave(config.exclusiveAccessKey, config.exclusiveAccessKeyConfigured),
+    literatureSearchCdk: normalizeSecretForSave(config.literatureSearchCdk, config.literatureSearchCdkConfigured),
+    llm: { ...config.llm, apiKey: normalizeSecretForSave(config.llm.apiKey, config.llmKeyConfigured) },
+    translation: { ...config.translation, apiKey: normalizeSecretForSave(config.translation.apiKey, config.translationKeyConfigured) },
+    image: { ...config.image, apiKey: normalizeSecretForSave(config.image.apiKey, config.imageKeyConfigured) },
+    wechat: config.wechat
+      ? { ...config.wechat, appSecret: normalizeSecretForSave(config.wechat.appSecret, config.wechatSecretConfigured) }
+      : config.wechat,
+    literatureSearchCdks: config.literatureSearchCdks?.map((cdk) => ({
+      ...cdk,
+      code: normalizeSecretForSave(cdk.code, cdk.code.includes("*") || cdk.code.includes("...")),
+    })),
+  };
+}
+
 export function dailyReviewAssetSrc(url?: string | null, accessKey?: string): string {
   const value = (url || "").trim();
   if (!value) return "";
@@ -98,42 +145,37 @@ export class ApiError extends Error {
 // 网络层失败也归一为 ApiError, 调用方只需处理一种错误类型 (Codex step4-P2)
 async function doFetch(input: string, init?: RequestInit): Promise<Response> {
   const isApiRequest = input.startsWith(BASE) || input.startsWith(activeBase);
-  const method = (init?.method || "GET").toUpperCase();
-  const shouldTimeout = !init?.signal && method === "GET" && typeof window !== "undefined";
   if (isApiRequest) {
     let lastError: unknown;
     for (const base of candidateBases()) {
       const url = withBase(input, base);
-      const controller = shouldTimeout ? new AbortController() : null;
-      const timeout = controller ? window.setTimeout(() => controller.abort(), 12000) : null;
-      try {
-        const res = await fetch(url, controller ? { ...init, signal: controller.signal } : init);
-        const contentType = res.headers.get("content-type") || "";
-        if (url.includes("/daily-review/") && contentType.includes("text/html")) {
-          lastError = new ApiError("API_PROXY_MISROUTED", res.status, `接口被前端路由接管: ${url}`);
-          continue;
+      const attempts = shouldRetryFetch(input, init) ? 2 : 1;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+          const res = await fetch(url, init);
+          const contentType = res.headers.get("content-type") || "";
+          if (url.includes("/daily-review/") && contentType.includes("text/html")) {
+            lastError = new ApiError("API_PROXY_MISROUTED", res.status, `API request was routed to frontend HTML: ${url}`);
+            continue;
+          }
+          if (res.status !== 404 || !url.includes("/daily-review/")) {
+            activeBase = base;
+            return res;
+          }
+          lastError = new ApiError("NOT_FOUND", 404, `API not found: ${url}`);
+        } catch (e) {
+          lastError = e;
+          if (!isAbortLikeError(e) || attempt + 1 >= attempts) break;
+          await sleepMs(350);
         }
-        if (res.status !== 404 || !url.includes("/daily-review/")) {
-          activeBase = base;
-          return res;
-        }
-        lastError = new ApiError("NOT_FOUND", 404, `接口不存在: ${url}`);
-      } catch (e) {
-        lastError = e;
-      } finally {
-        if (timeout) window.clearTimeout(timeout);
       }
     }
-    throw new ApiError(
-      "NETWORK_ERROR",
-      0,
-      lastError instanceof Error ? lastError.message : "无法连接后端服务",
-    );
+    throw new ApiError("NETWORK_ERROR", 0, normalizeNetworkMessage(lastError));
   }
   try {
     return await fetch(input, init);
   } catch (e) {
-    throw new ApiError("NETWORK_ERROR", 0, (e as Error).message || "网络错误");
+    throw new ApiError("NETWORK_ERROR", 0, normalizeNetworkMessage(e));
   }
 }
 
@@ -628,12 +670,12 @@ export async function getDailyReviewConfig(adminToken?: string): Promise<DailyRe
   );
 }
 
-export async function saveDailyReviewConfig(config: DailyReviewConfig, adminToken?: string): Promise<DailyReviewConfig> {
+export async function saveDailyReviewConfig(config: DailyReviewConfig, adminToken?: string, scope: "general" | "cdks" = "general"): Promise<DailyReviewConfig> {
   return handle<DailyReviewConfig>(
     await doFetch(`${BASE}/daily-review/config`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", ...authHeaders(adminToken) },
-      body: JSON.stringify(config),
+      headers: { "Content-Type": "application/json", "X-Daily-Review-Config-Scope": scope, ...authHeaders(adminToken) },
+      body: JSON.stringify(normalizeConfigForSave(config)),
     }),
   );
 }
@@ -1754,8 +1796,8 @@ export async function streamAgentRun(
       signal: opts.signal,
     });
   } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") throw e;
-    throw new ApiError("NETWORK_ERROR", 0, (e as Error).message || "网络错误");
+    if (isAbortLikeError(e)) return;
+    throw new ApiError("NETWORK_ERROR", 0, normalizeNetworkMessage(e));
   }
 
   // 修复2: 先检查 res.ok。非 2xx（如 404 RUN_NOT_FOUND）走 onError，不当 SSE 处理。
@@ -1846,8 +1888,8 @@ export async function streamAgentRun(
     });
   } catch (e) {
     if (e instanceof ApiError) throw e;
-    if (e instanceof Error && e.name === "AbortError") throw e;
-    throw new ApiError("STREAM_ERROR", 0, (e as Error)?.message || "流中断");
+    if (isAbortLikeError(e)) return;
+    throw new ApiError("STREAM_ERROR", 0, normalizeNetworkMessage(e));
   }
 
   // 修复3: 流结束但从未收到终态事件 → 通知 UI 连接中断
@@ -1924,7 +1966,7 @@ export async function streamChat(
     });
   } catch (e) {
     if (e instanceof ApiError) throw e;
-    throw new ApiError("STREAM_ERROR", 0, (e as Error)?.message || "流中断");
+    throw new ApiError("STREAM_ERROR", 0, normalizeNetworkMessage(e));
   }
   if (captured) throw new ApiError((captured as { code: string }).code, 0, (captured as { message: string }).message);
 }
@@ -1975,22 +2017,27 @@ export async function streamReview(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let sep: number;
-    while ((sep = buf.indexOf("\n\n")) >= 0) {
-      const frame = buf.slice(0, sep);
-      buf = buf.slice(sep + 2);
-      let event = "message";
-      const dataLines: string[] = [];
-      for (const line of frame.split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let sep: number;
+      while ((sep = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        let event = "message";
+        const dataLines: string[] = [];
+        for (const line of frame.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        if (dataLines.length) dispatchSse(event, dataLines.join("\n"), wrapped);
       }
-      if (dataLines.length) dispatchSse(event, dataLines.join("\n"), wrapped);
     }
+  } catch (e) {
+    if (isAbortLikeError(e) && signal?.aborted) return;
+    throw new ApiError("STREAM_ERROR", 0, normalizeNetworkMessage(e));
   }
   if (captured) {
     throw new ApiError((captured as { code: string }).code, 0, (captured as { message: string }).message);
