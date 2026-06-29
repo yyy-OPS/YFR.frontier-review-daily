@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
@@ -59,6 +59,11 @@ export function LiteratureSearchPage() {
   const [activeSearchId, setActiveSearchId] = useState(searchId || "");
   const [progress, setProgress] = useState<LiteratureSearchProgressItem | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const progressTaskRef = useRef<Promise<void> | null>(null);
+  const progressTimerRef = useRef<number | null>(null);
+  const progressVisibleRef = useRef(true);
+  const resultRef = useRef(result);
+  const progressRef = useRef(progress);
 
   const visibleLimit = useMemo(() => cdkInfo?.paperCountMax ?? 200, [cdkInfo]);
   const shareUrl = useMemo(() => {
@@ -71,6 +76,14 @@ export function LiteratureSearchPage() {
     const text = `${formatTime(item.updatedAt)} · ${item.stage} · ${item.message}`;
     setLogs((old) => (old[old.length - 1] === text ? old : [...old.slice(-20), text]));
   }
+
+  useEffect(() => {
+    resultRef.current = result;
+  }, [result]);
+
+  useEffect(() => {
+    progressRef.current = progress;
+  }, [progress]);
 
   useEffect(() => {
     if (!searchId) return;
@@ -92,8 +105,15 @@ export function LiteratureSearchPage() {
   useEffect(() => {
     if (!activeSearchId || result) return;
     let cancelled = false;
-    const timer = window.setInterval(() => {
-      getLiteratureSearchProgress(activeSearchId)
+    const clearTimer = () => {
+      if (progressTimerRef.current !== null) {
+        window.clearTimeout(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+    };
+    const poll = async () => {
+      if (cancelled || progressTaskRef.current) return;
+      const task = getLiteratureSearchProgress(activeSearchId)
         .then((data) => {
           if (cancelled) return;
           setProgress(data.progress);
@@ -113,11 +133,35 @@ export function LiteratureSearchPage() {
         })
         .catch(() => {
           /* 轮询偶发失败不打断任务。 */
+        })
+        .finally(() => {
+          if (progressTaskRef.current === task) progressTaskRef.current = null;
+          if (cancelled || resultRef.current || !progressVisibleRef.current) return;
+          const nextDelay = document.hidden ? 12000 : progressRef.current?.status === "running" ? 1800 : 4500;
+          clearTimer();
+          progressTimerRef.current = window.setTimeout(() => {
+            progressTimerRef.current = null;
+            void poll();
+          }, nextDelay);
         });
-    }, 1600);
+      progressTaskRef.current = task;
+      await task;
+    };
+    const onVisibilityChange = () => {
+      progressVisibleRef.current = !document.hidden;
+      if (document.hidden) {
+        clearTimer();
+        return;
+      }
+      if (!resultRef.current) void poll();
+    };
+    void poll();
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearTimer();
+      progressTaskRef.current = null;
     };
   }, [activeSearchId, result]);
 

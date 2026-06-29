@@ -1,6 +1,5 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import html2canvas from "html2canvas";
 import {
   ApiError,
   DailyReviewRunResult,
@@ -433,6 +432,7 @@ export function DailyReviewPage({ exclusive = false }: { exclusive?: boolean }) 
         1,
         Math.min(2, 28000 / Math.max(target.scrollHeight, 1), 14000 / Math.max(target.scrollWidth, 1)),
       );
+      const { default: html2canvas } = await import("html2canvas");
       const canvas = await html2canvas(target, {
         backgroundColor: "#fffdf8",
         logging: false,

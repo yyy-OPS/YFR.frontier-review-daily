@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   DailyReviewConfig,
@@ -145,10 +145,17 @@ export function ReviewAdminPage() {
   const [connectionStatus, setConnectionStatus] = useState<Record<string, string>>({});
   const [progressItems, setProgressItems] = useState<DailyReviewProgressItem[]>([]);
   const [draftItems, setDraftItems] = useState<DailyReviewDraftSummary[]>([]);
+  const progressTaskRef = useRef<Promise<void> | null>(null);
+  const progressTimerRef = useRef<number | null>(null);
+  const progressItemsRef = useRef<DailyReviewProgressItem[]>([]);
 
   useEffect(() => {
-    document.title = "Frontier Review Admin";
+    document.title = "YFR · 研域前沿综述 · 管理员后台";
   }, []);
+
+  useEffect(() => {
+    progressItemsRef.current = progressItems;
+  }, [progressItems]);
 
   useEffect(() => {
     if (!adminToken) return;
@@ -183,23 +190,67 @@ export function ReviewAdminPage() {
 
   async function refreshProgress() {
     if (!adminToken) return;
-    try {
-      const [data, drafts] = await Promise.all([
-        getDailyReviewProgress(adminToken),
-        getDailyReviewDrafts(adminToken),
-      ]);
-      setProgressItems(data.items);
-      setDraftItems(drafts.items);
-    } catch {
-      /* 进度刷新失败不打断后台操作 */
-    }
+    if (progressTaskRef.current) return progressTaskRef.current;
+    const task = Promise.all([
+      getDailyReviewProgress(adminToken),
+      getDailyReviewDrafts(adminToken),
+    ])
+      .then(([data, drafts]) => {
+        setProgressItems(data.items);
+        setDraftItems(drafts.items);
+      })
+      .catch(() => {
+        /* 进度刷新失败不打断后台操作 */
+      })
+      .finally(() => {
+        if (progressTaskRef.current === task) progressTaskRef.current = null;
+      });
+    progressTaskRef.current = task;
+    return task;
   }
 
   useEffect(() => {
     if (!adminToken) return;
-    void refreshProgress();
-    const timer = window.setInterval(() => void refreshProgress(), 2000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    const clearTimer = () => {
+      if (progressTimerRef.current !== null) {
+        window.clearTimeout(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+    };
+    const schedule = (delayMs: number) => {
+      if (cancelled || document.hidden) return;
+      clearTimer();
+      progressTimerRef.current = window.setTimeout(() => {
+        progressTimerRef.current = null;
+        void refreshProgress().then(() => {
+          if (cancelled || document.hidden) return;
+          const running = progressItemsRef.current.some((item) => item.status === "running");
+          schedule(running ? 2500 : 12000);
+        });
+      }, delayMs);
+    };
+    const kick = () => {
+      void refreshProgress().then(() => {
+        if (cancelled || document.hidden) return;
+        const running = progressItemsRef.current.some((item) => item.status === "running");
+        schedule(running ? 2500 : 12000);
+      });
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        clearTimer();
+        return;
+      }
+      kick();
+    };
+    kick();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearTimer();
+    };
   }, [adminToken]);
 
   function updateTopic(patch: Partial<ReviewTopicConfig>) {
@@ -207,7 +258,7 @@ export function ReviewAdminPage() {
     setConfig((old) => ({
       ...old,
       activeTopicId: selectedTopic.id,
-      topics: old.topics.map((topic) => topic.id === selectedTopic.id ? { ...topic, ...patch } : topic),
+      topics: old.topics.map((topic) => (topic.id === selectedTopic.id ? { ...topic, ...patch } : topic)),
     }));
   }
 
@@ -279,11 +330,11 @@ export function ReviewAdminPage() {
           ? await testDailyReviewSciverse(config, adminToken)
           : kind === "paper_search"
             ? await testDailyReviewPaperSearch(config, adminToken)
-          : kind === "llm"
-            ? await testDailyReviewLlm(config, adminToken)
-            : kind === "translation"
-              ? await testDailyReviewTranslation(config, adminToken)
-              : await testDailyReviewImage(config, adminToken);
+            : kind === "llm"
+              ? await testDailyReviewLlm(config, adminToken)
+              : kind === "translation"
+                ? await testDailyReviewTranslation(config, adminToken)
+                : await testDailyReviewImage(config, adminToken);
       setConnectionStatus((old) => ({
         ...old,
         [kind]: res.ok ? `连接成功：${res.detail ?? res.message}` : `连接失败：${res.detail ?? res.message}`,

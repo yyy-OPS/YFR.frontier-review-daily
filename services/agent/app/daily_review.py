@@ -238,6 +238,8 @@ class LiteratureOnlySearchResult(BaseModel):
     paperSearchSources: list[str]
     llmSearchQueries: list[str]
     searchExpression: str
+    cdkId: str | None = None
+    cdkName: str | None = None
     cdk: dict[str, Any] | None = None
     papers: list[dict[str, Any]]
 
@@ -273,6 +275,25 @@ class LiteratureSearchProgressResult(BaseModel):
 class LiteratureSearchStoredResult(BaseModel):
     result: LiteratureOnlySearchResult | None = None
     progress: LiteratureSearchProgressItem | None = None
+
+
+class LiteratureSearchSummary(BaseModel):
+    searchId: str
+    topic: str
+    sharePath: str
+    cdkId: str | None = None
+    cdkName: str | None = None
+    requested: int = 0
+    returned: int = 0
+    sinceYear: int | None = None
+    literatureProvider: str | None = None
+    status: str = "unknown"
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class LiteratureSearchListResult(BaseModel):
+    items: list[LiteratureSearchSummary]
 
 
 class AdminLoginRequest(BaseModel):
@@ -488,6 +509,10 @@ def _literature_search_path(search_id: str) -> Path:
     if not safe_id:
         safe_id = "search"
     return _literature_search_dir() / f"{safe_id}.json"
+
+
+def _literature_search_index_path() -> Path:
+    return _literature_search_dir() / "index.jsonl"
 
 
 def _runs_index_path() -> Path:
@@ -3554,6 +3579,8 @@ def _save_literature_search_payload(
         payload["result"] = result
     payload["updatedAt"] = datetime.now(timezone.utc).isoformat()
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if result is not None:
+        _upsert_literature_search_index(search_id, payload)
 
 
 def _load_literature_search_payload(search_id: str) -> dict[str, Any] | None:
@@ -3565,6 +3592,78 @@ def _load_literature_search_payload(search_id: str) -> dict[str, Any] | None:
         return data if isinstance(data, dict) else None
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _literature_search_summary_from_payload(search_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    progress = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
+    cdk = result.get("cdk") if isinstance(result.get("cdk"), dict) else {}
+    return {
+        "searchId": search_id,
+        "topic": str(result.get("topic") or progress.get("message") or "未命名检索"),
+        "sharePath": str(result.get("sharePath") or progress.get("sharePath") or f"/literature-search/{search_id}"),
+        "cdkId": result.get("cdkId") or cdk.get("id"),
+        "cdkName": result.get("cdkName") or cdk.get("name"),
+        "requested": int(result.get("requested") or progress.get("total") or 0),
+        "returned": int(result.get("returned") or progress.get("current") or 0),
+        "sinceYear": result.get("sinceYear"),
+        "literatureProvider": result.get("literatureProvider"),
+        "status": str(progress.get("status") or ("success" if result else "unknown")),
+        "createdAt": result.get("createdAt") or progress.get("startedAt"),
+        "updatedAt": payload.get("updatedAt") or progress.get("updatedAt"),
+    }
+
+
+def _upsert_literature_search_index(search_id: str, payload: dict[str, Any]) -> None:
+    summary = _literature_search_summary_from_payload(search_id, payload)
+    path = _literature_search_index_path()
+    rows: list[dict[str, Any]] = []
+    if path.exists():
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                if isinstance(item, dict) and item.get("searchId") != search_id:
+                    rows.append(item)
+        except (OSError, json.JSONDecodeError):
+            rows = []
+    rows.append(summary)
+    rows = sorted(rows, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)[:5000]
+    _write_literature_search_index(rows)
+
+
+def _write_literature_search_index(rows: list[dict[str, Any]]) -> None:
+    path = _literature_search_index_path()
+    path.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in rows) + ("\n" if rows else ""), encoding="utf-8")
+
+
+def _iter_literature_search_summaries() -> list[dict[str, Any]]:
+    path = _literature_search_index_path()
+    rows: list[dict[str, Any]] = []
+    if path.exists():
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                if isinstance(item, dict) and item.get("searchId"):
+                    rows.append(item)
+        except (OSError, json.JSONDecodeError):
+            rows = []
+    if rows:
+        return rows
+    for item_path in _literature_search_dir().glob("*.json"):
+        if item_path.name == "index.jsonl":
+            continue
+        search_id = item_path.stem
+        payload = _load_literature_search_payload(search_id)
+        if payload:
+            rows.append(_literature_search_summary_from_payload(search_id, payload))
+    rows = sorted(rows, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    if rows:
+        _write_literature_search_index(rows[:5000])
+    return rows
 
 
 def _set_literature_search_progress(
@@ -4895,6 +4994,8 @@ async def _execute_literature_search(
         paperSearchSources=paper_sources,
         llmSearchQueries=extra_queries,
         searchExpression=search_expression,
+        cdkId=cdk.id if cdk else None,
+        cdkName=cdk.name if cdk else None,
         cdk=_literature_cdk_public_info(fresh_cdk or cdk),
         papers=papers,
     )
@@ -5007,6 +5108,16 @@ async def get_literature_search_result(search_id: str):
         result=LiteratureOnlySearchResult(**result) if isinstance(result, dict) else None,
         progress=LiteratureSearchProgressItem(**progress) if isinstance(progress, dict) else None,
     )
+
+
+@router.get("/admin/literature-searches", response_model=LiteratureSearchListResult)
+async def get_admin_literature_searches(request: Request, cdkId: str | None = None, limit: int = 300):
+    _require_admin(request)
+    limit = max(1, min(limit, 1000))
+    rows = _iter_literature_search_summaries()
+    if cdkId:
+        rows = [item for item in rows if str(item.get("cdkId") or "") == cdkId]
+    return LiteratureSearchListResult(items=[LiteratureSearchSummary(**item) for item in rows[:limit]])
 
 
 @router.post("/pdf", response_model=PdfResolveResult)

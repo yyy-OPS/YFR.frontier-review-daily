@@ -47,20 +47,11 @@ let activeBase = initialBase(BASE);
 function candidateBases(): string[] {
   const isBrowser = typeof window !== "undefined";
   const isLocalHost = isBrowser && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-  if (isBrowser && !isLocalHost && BASE.startsWith("/")) {
-    return Array.from(new Set([activeBase, BASE].map((x) => x.replace(/\/$/, ""))));
+  const bases = [activeBase, BASE];
+  if (isBrowser && isLocalHost) {
+    bases.push("http://127.0.0.1:8011", "http://localhost:8011");
   }
-  const bases = [
-    activeBase,
-    "http://127.0.0.1:8011",
-    "http://localhost:8011",
-    "http://127.0.0.1:8010",
-    "http://localhost:8010",
-    BASE,
-    "http://127.0.0.1:8000",
-    "http://localhost:8000",
-  ].map((x) => x.replace(/\/$/, ""));
-  return Array.from(new Set(bases));
+  return Array.from(new Set(bases.map((x) => x.replace(/\/$/, ""))));
 }
 
 function withBase(input: string, base: string): string {
@@ -107,12 +98,16 @@ export class ApiError extends Error {
 // 网络层失败也归一为 ApiError, 调用方只需处理一种错误类型 (Codex step4-P2)
 async function doFetch(input: string, init?: RequestInit): Promise<Response> {
   const isApiRequest = input.startsWith(BASE) || input.startsWith(activeBase);
+  const method = (init?.method || "GET").toUpperCase();
+  const shouldTimeout = !init?.signal && method === "GET" && typeof window !== "undefined";
   if (isApiRequest) {
     let lastError: unknown;
     for (const base of candidateBases()) {
       const url = withBase(input, base);
+      const controller = shouldTimeout ? new AbortController() : null;
+      const timeout = controller ? window.setTimeout(() => controller.abort(), 12000) : null;
       try {
-        const res = await fetch(url, init);
+        const res = await fetch(url, controller ? { ...init, signal: controller.signal } : init);
         const contentType = res.headers.get("content-type") || "";
         if (url.includes("/daily-review/") && contentType.includes("text/html")) {
           lastError = new ApiError("API_PROXY_MISROUTED", res.status, `接口被前端路由接管: ${url}`);
@@ -125,6 +120,8 @@ async function doFetch(input: string, init?: RequestInit): Promise<Response> {
         lastError = new ApiError("NOT_FOUND", 404, `接口不存在: ${url}`);
       } catch (e) {
         lastError = e;
+      } finally {
+        if (timeout) window.clearTimeout(timeout);
       }
     }
     throw new ApiError(
@@ -380,6 +377,8 @@ export interface LiteratureOnlySearchResult {
   paperSearchSources: string[];
   llmSearchQueries: string[];
   searchExpression: string;
+  cdkId?: string | null;
+  cdkName?: string | null;
   cdk?: LiteratureCdkPublicInfo | null;
   papers: DailyReviewPaper[];
 }
@@ -406,6 +405,21 @@ export interface LiteratureSearchAccepted {
   searchId: string;
   sharePath: string;
   progress: LiteratureSearchProgressItem;
+}
+
+export interface LiteratureSearchSummary {
+  searchId: string;
+  topic: string;
+  sharePath: string;
+  cdkId?: string | null;
+  cdkName?: string | null;
+  requested: number;
+  returned: number;
+  sinceYear?: number | null;
+  literatureProvider?: string | null;
+  status: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 export interface DailyReviewPdfResolveResult {
@@ -679,6 +693,16 @@ export async function getExclusiveReviewHistory(accessKey: string, limit = 30, t
 export async function getDailyReviewAdminRuns(limit = 80, adminToken?: string): Promise<{ items: DailyReviewRunSummary[] }> {
   return handle<{ items: DailyReviewRunSummary[] }>(
     await doFetch(`${BASE}/daily-review/admin/runs?limit=${encodeURIComponent(String(limit))}`, {
+      headers: authHeaders(adminToken),
+    }),
+  );
+}
+
+export async function getAdminLiteratureSearches(adminToken?: string, cdkId?: string, limit = 300): Promise<{ items: LiteratureSearchSummary[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cdkId) params.set("cdkId", cdkId);
+  return handle<{ items: LiteratureSearchSummary[] }>(
+    await doFetch(`${BASE}/daily-review/admin/literature-searches?${params.toString()}`, {
       headers: authHeaders(adminToken),
     }),
   );

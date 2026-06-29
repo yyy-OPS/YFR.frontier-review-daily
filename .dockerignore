@@ -1,9 +1,11 @@
 apps/web/node_modules
 apps/web/dist
+apps/web/pnpm-workspace.yaml
 services/agent/__pycache__
 services/agent/app/__pycache__
 **/__pycache__
 data
+local_runtime
 .env
 *.zip
 *.log

@@ -1,27 +1,31 @@
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
-import { DailyReviewPage } from "./pages/DailyReviewPage";
-import { CdkAdminPage } from "./pages/CdkAdminPage";
-import { LiteratureSearchPage } from "./pages/LiteratureSearchPage";
-import { ReviewAdminPage } from "./pages/ReviewAdminPage";
-import { WechatAdminPage } from "./pages/WechatAdminPage";
+const DailyReviewPage = lazy(() => import("./pages/DailyReviewPage").then((module) => ({ default: module.DailyReviewPage })));
+const CdkAdminPage = lazy(() => import("./pages/CdkAdminPage").then((module) => ({ default: module.CdkAdminPage })));
+const LiteratureSearchPage = lazy(() => import("./pages/LiteratureSearchPage").then((module) => ({ default: module.LiteratureSearchPage })));
+const ReviewAdminPage = lazy(() => import("./pages/ReviewAdminPage").then((module) => ({ default: module.ReviewAdminPage })));
+const WechatAdminPage = lazy(() => import("./pages/WechatAdminPage").then((module) => ({ default: module.WechatAdminPage })));
 
 export function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/daily-review" replace />} />
-      <Route path="/daily-review" element={<DailyReviewPage />} />
-      <Route path="/daily-review/:topicSlug/:runId" element={<DailyReviewPage />} />
-      <Route path="/daily-review/:topicSlug" element={<DailyReviewPage />} />
-      <Route path="/literature-search" element={<LiteratureSearchPage />} />
-      <Route path="/literature-search/:searchId" element={<LiteratureSearchPage />} />
-      <Route path="/admin" element={<ReviewAdminPage />} />
-      <Route path="/admin/CDK" element={<CdkAdminPage />} />
-      <Route path="/admin/exclusive-review" element={<DailyReviewPage exclusive />} />
-      <Route path="/admin/exclusive-review/:topicSlug/:runId" element={<DailyReviewPage exclusive />} />
-      <Route path="/admin/exclusive-review/:topicSlug" element={<DailyReviewPage exclusive />} />
-      <Route path="/admin/wechat" element={<WechatAdminPage />} />
-      <Route path="*" element={<Navigate to="/daily-review" replace />} />
-    </Routes>
+    <Suspense fallback={<main className="daily-page standalone"><div className="daily-loading">正在加载页面资源...</div></main>}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/daily-review" replace />} />
+        <Route path="/daily-review" element={<DailyReviewPage />} />
+        <Route path="/daily-review/:topicSlug/:runId" element={<DailyReviewPage />} />
+        <Route path="/daily-review/:topicSlug" element={<DailyReviewPage />} />
+        <Route path="/literature-search" element={<LiteratureSearchPage />} />
+        <Route path="/literature-search/:searchId" element={<LiteratureSearchPage />} />
+        <Route path="/admin" element={<ReviewAdminPage />} />
+        <Route path="/admin/CDK" element={<CdkAdminPage />} />
+        <Route path="/admin/cdk" element={<CdkAdminPage />} />
+        <Route path="/admin/exclusive-review" element={<DailyReviewPage exclusive />} />
+        <Route path="/admin/exclusive-review/:topicSlug/:runId" element={<DailyReviewPage exclusive />} />
+        <Route path="/admin/exclusive-review/:topicSlug" element={<DailyReviewPage exclusive />} />
+        <Route path="/admin/wechat" element={<WechatAdminPage />} />
+        <Route path="*" element={<Navigate to="/daily-review" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
