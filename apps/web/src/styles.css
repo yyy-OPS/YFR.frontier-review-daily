@@ -4454,11 +4454,20 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   font-size: 0.92rem;
 }
 
-.daily-public-links a {
+.daily-public-links a,
+.daily-public-links span {
   color: #184b57;
   font-weight: 800;
+}
+
+.daily-public-links a {
   text-decoration: none;
   border-bottom: 2px solid rgba(24, 75, 87, 0.28);
+}
+
+.daily-public-links .daily-public-brand {
+  color: #27231e;
+  border-bottom-color: rgba(39, 35, 30, 0.32);
 }
 
 .literature-cdk-panel {
@@ -4705,7 +4714,16 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   letter-spacing: 0;
 }
 
-.literature-query-box {
+.literature-result-head code {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 0.5rem;
+  color: rgba(36, 33, 29, 0.72);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.literature-progress-panel {
   margin: 1rem 0;
   border: 1px solid rgba(36, 33, 29, 0.16);
   border-radius: 8px;
@@ -4713,18 +4731,66 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   background: #f7efe0;
 }
 
-.literature-query-box div {
+.literature-progress-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
-.literature-query-box span {
-  border: 1px solid rgba(18, 63, 75, 0.18);
-  background: #fffdf8;
+.literature-progress-head > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.literature-progress-head strong {
+  font-size: 1.1rem;
+}
+
+.literature-progress-bar {
+  height: 12px;
+  border: 1px solid #24211d;
   border-radius: 999px;
-  padding: 0.4rem 0.62rem;
+  background: #fffdf8;
+  overflow: hidden;
+  margin: 0.85rem 0 0.65rem;
+}
+
+.literature-progress-bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #123f4b;
+  transition: width 240ms ease;
+}
+
+.literature-progress-panel.indeterminate .literature-progress-bar i {
+  width: 42%;
+  animation: literature-progress-slide 1.35s ease-in-out infinite;
+}
+
+.literature-progress-panel p,
+.literature-progress-panel small {
+  margin: 0;
+  color: rgba(36, 33, 29, 0.74);
+  overflow-wrap: anywhere;
+}
+
+.literature-log-list {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 180px;
+  overflow: auto;
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed rgba(36, 33, 29, 0.22);
+  font-size: 0.88rem;
+  color: rgba(36, 33, 29, 0.72);
+}
+
+@keyframes literature-progress-slide {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(245%); }
 }
 
 .literature-paper-list {
@@ -4781,6 +4847,58 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   padding: 0.35rem 0.58rem;
   font-size: 0.86rem;
   font-weight: 800;
+}
+
+.cdk-admin-layout {
+  grid-template-columns: minmax(320px, 0.9fr) minmax(320px, 1.1fr);
+}
+
+.cdk-bulk-card,
+.cdk-table-card {
+  align-self: start;
+}
+
+.cdk-table-card {
+  grid-column: 1 / -1;
+}
+
+.cdk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+
+.cdk-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 900;
+}
+
+.cdk-table {
+  display: grid;
+  gap: 1rem;
+}
+
+.cdk-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 0.8rem;
+  border: 1px solid rgba(34, 32, 29, 0.16);
+  border-radius: 8px;
+  background: #fffdf8;
+  padding: 1rem;
+}
+
+.cdk-check {
+  padding-top: 0.6rem;
+}
+
+.cdk-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 0.8rem;
 }
 
 .daily-loading {

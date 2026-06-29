@@ -547,18 +547,11 @@ export function DailyReviewPage({ exclusive = false }: { exclusive?: boolean }) 
           )}
         </section>
         <div className="daily-public-links" aria-label="YFR 项目链接">
-          <strong>YFR · 研域前沿综述</strong>
-          <a href="/literature-search">只检索文献</a>
-          <a href="https://yfr.yangy.cn" target="_blank" rel="noreferrer">yfr.yangy.cn</a>
+          <a className="daily-public-brand" href="https://yfr.yangy.cn/" target="_blank" rel="noreferrer">YFR · 研域前沿综述</a>
+          <a href="/literature-search">检索文献</a>
           <a href="https://github.com/yyy-OPS/YFR.frontier-review-daily" target="_blank" rel="noreferrer">GitHub 开源地址</a>
+          <span>基于 <a href="https://github.com/niuniu-869/Biblio_Agent" target="_blank" rel="noreferrer">niuniu-869/Biblio_Agent</a> 开源项目扩展</span>
         </div>
-        <footer className="daily-source-credit daily-source-credit-directory">
-          基于{" "}
-          <a href="https://github.com/niuniu-869/Biblio_Agent" target="_blank" rel="noreferrer">
-            niuniu-869/Biblio_Agent
-          </a>{" "}
-          开源项目扩展
-        </footer>
       </main>
     );
   }

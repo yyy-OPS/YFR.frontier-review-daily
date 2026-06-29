@@ -227,6 +227,9 @@ class LiteratureCdkStatusResult(BaseModel):
 
 class LiteratureOnlySearchResult(BaseModel):
     ok: bool
+    searchId: str | None = None
+    sharePath: str | None = None
+    createdAt: str | None = None
     topic: str
     requested: int
     returned: int
@@ -237,6 +240,39 @@ class LiteratureOnlySearchResult(BaseModel):
     searchExpression: str
     cdk: dict[str, Any] | None = None
     papers: list[dict[str, Any]]
+
+
+class LiteratureSearchProgressItem(BaseModel):
+    searchId: str
+    status: Literal["queued", "running", "success", "error"]
+    stage: str
+    message: str
+    mode: Literal["determinate", "indeterminate"] = "determinate"
+    detail: str | None = None
+    percent: int = Field(default=0, ge=0, le=100)
+    current: int = 0
+    total: int | None = None
+    startedAt: str | None = None
+    updatedAt: str | None = None
+    completedAt: str | None = None
+    error: str | None = None
+    sharePath: str | None = None
+
+
+class LiteratureSearchAccepted(BaseModel):
+    accepted: bool
+    searchId: str
+    sharePath: str
+    progress: LiteratureSearchProgressItem
+
+
+class LiteratureSearchProgressResult(BaseModel):
+    progress: LiteratureSearchProgressItem
+
+
+class LiteratureSearchStoredResult(BaseModel):
+    result: LiteratureOnlySearchResult | None = None
+    progress: LiteratureSearchProgressItem | None = None
 
 
 class AdminLoginRequest(BaseModel):
@@ -423,6 +459,8 @@ class DailyReviewTopicsResult(BaseModel):
 
 _RUN_PROGRESS: dict[str, dict[str, Any]] = {}
 _RUN_TASKS: dict[str, asyncio.Task] = {}
+_LITERATURE_SEARCH_PROGRESS: dict[str, dict[str, Any]] = {}
+_LITERATURE_SEARCH_TASKS: dict[str, asyncio.Task] = {}
 
 
 def _config_path() -> Path:
@@ -437,6 +475,19 @@ def _runs_dir() -> Path:
     root = Path(settings.frontier_review_data_dir) / "runs"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _literature_search_dir() -> Path:
+    root = Path(settings.frontier_review_data_dir) / "literature_search"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _literature_search_path(search_id: str) -> Path:
+    safe_id = _safe_draft_part(search_id)
+    if not safe_id:
+        safe_id = "search"
+    return _literature_search_dir() / f"{safe_id}.json"
 
 
 def _runs_index_path() -> Path:
@@ -1201,6 +1252,12 @@ def _sciverse_from_config(request: Request, config: DailyReviewConfig) -> Sciver
 
 def _sciverse_from_app(app: Any, config: DailyReviewConfig) -> SciverseClient:
     return SciverseClient(app.state.sciverse_client._c, token=config.sciverseApiToken or settings.sciverse_api_token)
+
+
+def _sciverse_for_literature_search(request: Request | None, app: Any, config: DailyReviewConfig) -> SciverseClient:
+    if request is not None:
+        return _sciverse_from_config(request, config)
+    return _sciverse_from_app(app, config)
 
 
 def _llm_from_config(request: Request, config: DailyReviewConfig):
@@ -3471,6 +3528,82 @@ def _progress_item_for_topic(config: DailyReviewConfig, topic_id: str) -> DailyR
     raise ApiError(404, "TOPIC_NOT_FOUND", "主题不存在")
 
 
+def _new_literature_search_id(topic: str) -> str:
+    seed = f"literature-search:{topic}:{datetime.now(timezone.utc).isoformat()}:{os.urandom(8).hex()}"
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+
+def _save_literature_search_payload(
+    search_id: str,
+    *,
+    result: dict[str, Any] | None = None,
+    progress: dict[str, Any] | None = None,
+) -> None:
+    path = _literature_search_path(search_id)
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            old = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(old, dict):
+                payload = old
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+    if progress is not None:
+        payload["progress"] = progress
+    if result is not None:
+        payload["result"] = result
+    payload["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_literature_search_payload(search_id: str) -> dict[str, Any] | None:
+    path = _literature_search_path(search_id)
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _set_literature_search_progress(
+    search_id: str,
+    *,
+    status: Literal["queued", "running", "success", "error"],
+    stage: str,
+    message: str,
+    percent: int,
+    current: int = 0,
+    total: int | None = None,
+    mode: Literal["determinate", "indeterminate"] = "determinate",
+    detail: str | None = None,
+    error: str | None = None,
+) -> LiteratureSearchProgressItem:
+    now = datetime.now(timezone.utc).isoformat()
+    old = _LITERATURE_SEARCH_PROGRESS.get(search_id) or {}
+    started_at = old.get("startedAt") or now
+    progress = {
+        "searchId": search_id,
+        "status": status,
+        "stage": stage,
+        "message": message,
+        "mode": mode,
+        "detail": detail,
+        "percent": max(0, min(100, int(percent))),
+        "current": max(0, int(current or 0)),
+        "total": total,
+        "startedAt": started_at,
+        "updatedAt": now,
+        "completedAt": now if status in {"success", "error"} else None,
+        "error": error,
+        "sharePath": f"/literature-search/{search_id}",
+    }
+    _LITERATURE_SEARCH_PROGRESS[search_id] = progress
+    _save_literature_search_payload(search_id, progress=progress)
+    return LiteratureSearchProgressItem(**progress)
+
+
 def _find_run(run_id: str) -> dict[str, Any] | None:
     for item in reversed(_iter_run_index()):
         if str(item.get("runId") or "") != run_id:
@@ -4686,9 +4819,13 @@ async def get_literature_cdk_status(body: LiteratureCdkStatusRequest, request: R
     return LiteratureCdkStatusResult(ok=True, cdk=_literature_cdk_public_info(cdk), message="CDK 可用")
 
 
-@router.post("/literature-search", response_model=LiteratureOnlySearchResult)
-async def search_literature_only(body: LiteratureOnlySearchRequest, request: Request):
-    _check_literature_search_rate_limit(request)
+async def _execute_literature_search(
+    body: LiteratureOnlySearchRequest,
+    app: Any,
+    request: Request | None = None,
+    search_id: str | None = None,
+    progress: ProgressCallback | None = None,
+) -> LiteratureOnlySearchResult:
     config = _load_config()
     cdk = _find_valid_literature_cdk(config, body.cdk or "")
     has_own_llm = bool(
@@ -4711,14 +4848,18 @@ async def search_literature_only(body: LiteratureOnlySearchRequest, request: Req
         body.paperSearchSources or (cdk.paperSearchSources if cdk and cdk.paperSearchSources else config.paperSearchSources)
     )
     llm = _llm_from_literature_search_request(body, config)
-    extra_queries = await _expand_search_queries_with_clean_prompt(llm, topic)
+    if progress:
+        progress("准备", "正在校验 CDK、模型与检索配置", 1, 0, requested_count, "indeterminate", "本地配置校验")
+    extra_queries = await _expand_search_queries_with_clean_prompt(llm, topic, progress=progress)
     fields = [
         "title", "doi", "author", "publication_published_year", "publication_published_date",
         "publication_venue_name_unified", "citation_count", "influential_citation_count", "fwci",
         "doc_id", "unique_id", "abstract", "access_oa_url",
     ]
+    if progress:
+        progress("文献检索", f"正在检索并筛选 {requested_count} 篇文献", 8, 0, requested_count, "determinate", "按已筛选文献数量计算")
     papers, _meta, search_expression = await _collect_papers(
-        _sciverse_from_config(request, config),
+        _sciverse_for_literature_search(request, app, config),
         topic,
         requested_count,
         since_year,
@@ -4727,16 +4868,25 @@ async def search_literature_only(body: LiteratureOnlySearchRequest, request: Req
         provider=provider,
         paper_search_sources=paper_sources,
         extra_queries=extra_queries,
+        progress=progress,
     )
+    if progress:
+        progress("去重评分", "正在按 DOI、标题和 uniqueId 去重并计算质量分", 72, len(papers), requested_count, "indeterminate", "本地去重与排序")
     dynamic_terms = _dynamic_topic_terms(topic, extra_queries)
     papers = _rank_quality_papers(_dedupe(papers), allow_weak=True, topic=topic, dynamic_terms=dynamic_terms)[:requested_count]
     if settings.paper_search_validate_links:
-        papers = await _validate_paper_links(papers)
+        papers = await _validate_paper_links(papers, progress=progress)
     _annotate_evidence_scores(papers, topic, dynamic_terms, {})
     _consume_literature_cdk(config, cdk.id if cdk and not has_own_llm else None)
     fresh_cdk = _find_valid_literature_cdk(_load_config(), body.cdk or "") if cdk else None
+    created_at = datetime.now(timezone.utc).isoformat()
+    if progress:
+        progress("完成", f"已返回 {len(papers)} 篇文献", 100, len(papers), requested_count, "determinate", "结果已持久化")
     return LiteratureOnlySearchResult(
         ok=bool(papers),
+        searchId=search_id,
+        sharePath=f"/literature-search/{search_id}" if search_id else None,
+        createdAt=created_at,
         topic=topic,
         requested=requested_count,
         returned=len(papers),
@@ -4747,6 +4897,115 @@ async def search_literature_only(body: LiteratureOnlySearchRequest, request: Req
         searchExpression=search_expression,
         cdk=_literature_cdk_public_info(fresh_cdk or cdk),
         papers=papers,
+    )
+
+
+@router.post("/literature-search", response_model=LiteratureOnlySearchResult)
+async def search_literature_only(body: LiteratureOnlySearchRequest, request: Request):
+    _check_literature_search_rate_limit(request)
+    search_id = _new_literature_search_id(body.topic)
+    result = await _execute_literature_search(body, request.app, request=request, search_id=search_id)
+    _save_literature_search_payload(search_id, result=result.model_dump())
+    return result
+
+
+@router.post("/literature-search/async", response_model=LiteratureSearchAccepted)
+async def search_literature_only_async(body: LiteratureOnlySearchRequest, request: Request):
+    _check_literature_search_rate_limit(request)
+    app = request.app
+    search_id = _new_literature_search_id(body.topic)
+    progress_item = _set_literature_search_progress(
+        search_id,
+        status="queued",
+        stage="排队",
+        message="检索任务已创建，正在进入多源检索流程",
+        percent=0,
+        current=0,
+        total=body.paperCount,
+        mode="indeterminate",
+        detail="任务状态会自动刷新",
+    )
+
+    def progress(
+        stage: str,
+        message: str,
+        percent: int,
+        current: int = 0,
+        total: int | None = None,
+        mode: Literal["determinate", "indeterminate"] = "determinate",
+        detail: str | None = None,
+    ) -> None:
+        _set_literature_search_progress(
+            search_id,
+            status="running",
+            stage=stage,
+            message=message,
+            percent=percent,
+            current=current,
+            total=total,
+            mode=mode,
+            detail=detail,
+        )
+
+    async def runner() -> None:
+        try:
+            result = await _execute_literature_search(body, app, request=None, search_id=search_id, progress=progress)
+            _save_literature_search_payload(search_id, result=result.model_dump())
+            _set_literature_search_progress(
+                search_id,
+                status="success",
+                stage="完成",
+                message=f"已完成 {result.returned} 篇文献检索并持久化保存",
+                percent=100,
+                current=result.returned,
+                total=result.requested,
+                mode="determinate",
+                detail="可复制当前路径分享或稍后再次查看",
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Literature search task failed: %s", search_id)
+            message = exc.message if isinstance(exc, ApiError) else str(exc)
+            _set_literature_search_progress(
+                search_id,
+                status="error",
+                stage="失败",
+                message=message,
+                percent=0,
+                current=0,
+                total=body.paperCount,
+                mode="indeterminate",
+                detail="请检查 CDK、LLM 配置或检索源状态后重试",
+                error=message,
+            )
+        finally:
+            _LITERATURE_SEARCH_TASKS.pop(search_id, None)
+
+    task = asyncio.create_task(runner())
+    _LITERATURE_SEARCH_TASKS[search_id] = task
+    return LiteratureSearchAccepted(accepted=True, searchId=search_id, sharePath=f"/literature-search/{search_id}", progress=progress_item)
+
+
+@router.get("/literature-search/progress/{search_id}", response_model=LiteratureSearchProgressResult)
+async def get_literature_search_progress(search_id: str):
+    progress = _LITERATURE_SEARCH_PROGRESS.get(search_id)
+    if not progress:
+        payload = _load_literature_search_payload(search_id)
+        progress = payload.get("progress") if payload else None
+    if not progress:
+        raise ApiError(404, "LITERATURE_SEARCH_NOT_FOUND", "检索记录不存在")
+    return LiteratureSearchProgressResult(progress=LiteratureSearchProgressItem(**progress))
+
+
+@router.get("/literature-search/results/{search_id}", response_model=LiteratureSearchStoredResult)
+async def get_literature_search_result(search_id: str):
+    payload = _load_literature_search_payload(search_id)
+    if not payload:
+        raise ApiError(404, "LITERATURE_SEARCH_NOT_FOUND", "检索记录不存在")
+    result = payload.get("result")
+    progress = payload.get("progress")
+    return LiteratureSearchStoredResult(
+        result=LiteratureOnlySearchResult(**result) if isinstance(result, dict) else None,
+        progress=LiteratureSearchProgressItem(**progress) if isinstance(progress, dict) else None,
     )
 
 

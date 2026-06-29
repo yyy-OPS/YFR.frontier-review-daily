@@ -369,6 +369,9 @@ export interface LiteratureOnlySearchRequest {
 
 export interface LiteratureOnlySearchResult {
   ok: boolean;
+  searchId?: string | null;
+  sharePath?: string | null;
+  createdAt?: string | null;
   topic: string;
   requested: number;
   returned: number;
@@ -379,6 +382,30 @@ export interface LiteratureOnlySearchResult {
   searchExpression: string;
   cdk?: LiteratureCdkPublicInfo | null;
   papers: DailyReviewPaper[];
+}
+
+export interface LiteratureSearchProgressItem {
+  searchId: string;
+  status: "queued" | "running" | "success" | "error";
+  stage: string;
+  message: string;
+  mode: "determinate" | "indeterminate";
+  detail?: string | null;
+  percent: number;
+  current: number;
+  total?: number | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+  completedAt?: string | null;
+  error?: string | null;
+  sharePath?: string | null;
+}
+
+export interface LiteratureSearchAccepted {
+  accepted: boolean;
+  searchId: string;
+  sharePath: string;
+  progress: LiteratureSearchProgressItem;
 }
 
 export interface DailyReviewPdfResolveResult {
@@ -680,6 +707,28 @@ export async function searchLiteratureOnly(body: LiteratureOnlySearchRequest): P
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  );
+}
+
+export async function startLiteratureSearch(body: LiteratureOnlySearchRequest): Promise<LiteratureSearchAccepted> {
+  return handle<LiteratureSearchAccepted>(
+    await doFetch(`${BASE}/daily-review/literature-search/async`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function getLiteratureSearchProgress(searchId: string): Promise<{ progress: LiteratureSearchProgressItem }> {
+  return handle<{ progress: LiteratureSearchProgressItem }>(
+    await doFetch(`${BASE}/daily-review/literature-search/progress/${enc(searchId)}`),
+  );
+}
+
+export async function getLiteratureSearchResult(searchId: string): Promise<{ result: LiteratureOnlySearchResult | null; progress?: LiteratureSearchProgressItem | null }> {
+  return handle<{ result: LiteratureOnlySearchResult | null; progress?: LiteratureSearchProgressItem | null }>(
+    await doFetch(`${BASE}/daily-review/literature-search/results/${enc(searchId)}`),
   );
 }
 
