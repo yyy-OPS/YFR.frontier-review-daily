@@ -25,6 +25,10 @@ server {
   root /usr/share/nginx/html;
   index index.html;
 
+  absolute_redirect off;
+  port_in_redirect off;
+  server_name_in_redirect off;
+
   client_max_body_size 50m;
   access_log /dev/stdout;
   error_log /dev/stderr warn;
