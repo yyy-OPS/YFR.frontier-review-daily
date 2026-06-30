@@ -257,15 +257,15 @@ export function CdkRecordsPage() {
                   <strong>{item.topic}</strong>
                   <small>{item.searchId}</small>
                 </div>
-                <div>
+                <div data-label="来源">
                   <span className={`cdk-source-pill ${item.sourceType || "unknown"}`}>{sourceLabel(item.sourceType)}</span>
                   {item.cdkName && <small>{item.cdkName}</small>}
                   <small>{item.literatureProvider || "-"}</small>
                 </div>
-                <span>{item.returned}/{item.requested}</span>
-                <span>{item.sinceYear ? `${item.sinceYear} 年以来` : "-"}</span>
-                <span className={`cdk-status-pill ${item.status}`}>{statusLabel(item.status)}</span>
-                <span>{formatTime(item.createdAt || item.updatedAt)}</span>
+                <span data-label="数量">{item.returned}/{item.requested}</span>
+                <span data-label="范围">{item.sinceYear ? `${item.sinceYear} 年以来` : "-"}</span>
+                <span data-label="状态"><span className={`cdk-status-pill ${item.status}`}>{statusLabel(item.status)}</span></span>
+                <span data-label="时间">{formatTime(item.createdAt || item.updatedAt)}</span>
                 <div className="cdk-record-actions">
                   <a className="btn btn-ghost daily-test-btn" href={item.sharePath}>查看</a>
                   <button className="btn btn-ghost daily-test-btn" type="button" onClick={() => void copyRecord(item)}>复制</button>

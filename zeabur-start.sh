@@ -42,6 +42,10 @@ server {
     proxy_connect_timeout 30s;
   }
 
+  location = / {
+    return 302 /daily-review/;
+  }
+
   location / {
     try_files \$uri \$uri/ /index.html;
   }

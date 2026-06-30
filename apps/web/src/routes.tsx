@@ -14,6 +14,7 @@ export function AppRoutes() {
       <Routes>
         <Route path="/" element={<Navigate to="/daily-review" replace />} />
         <Route path="/daily-review" element={<DailyReviewPage />} />
+        <Route path="/daily-review/" element={<DailyReviewPage />} />
         <Route path="/daily-review/:topicSlug/:runId" element={<DailyReviewPage />} />
         <Route path="/daily-review/:topicSlug" element={<DailyReviewPage />} />
         <Route path="/literature-search" element={<LiteratureSearchPage />} />

@@ -4982,12 +4982,15 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
 }
 
 .cdk-records-layout {
-  grid-template-columns: minmax(280px, 0.82fr) minmax(520px, 1.5fr);
+  grid-template-columns: minmax(280px, 0.78fr) minmax(0, 1.55fr);
+  align-items: start;
 }
 
 .cdk-record-filter-card,
 .cdk-record-results-card {
   align-self: start;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .cdk-record-filter-card {
@@ -5002,14 +5005,24 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
 .cdk-record-table {
   display: grid;
   gap: 0.65rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .cdk-record-head,
 .cdk-record-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.5fr) minmax(150px, 0.9fr) 86px 110px 86px 130px 132px;
-  gap: 0.75rem;
+  grid-template-columns:
+    minmax(150px, 1.5fr)
+    minmax(92px, 0.82fr)
+    minmax(62px, 0.45fr)
+    minmax(82px, 0.58fr)
+    minmax(64px, 0.45fr)
+    minmax(92px, 0.68fr)
+    minmax(82px, 0.48fr);
+  gap: 0.55rem;
   align-items: center;
+  min-width: 0;
 }
 
 .cdk-record-head {
@@ -5025,7 +5038,9 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   border: 1px solid rgba(36, 33, 29, 0.14);
   border-radius: 8px;
   background: #fffdf8;
-  padding: 0.85rem 0.75rem;
+  padding: 0.85rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .cdk-record-row:hover {
@@ -5036,6 +5051,10 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
 .cdk-record-topic {
   display: grid;
   gap: 0.22rem;
+  min-width: 0;
+}
+
+.cdk-record-row > * {
   min-width: 0;
 }
 
@@ -5094,6 +5113,44 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.cdk-record-actions .btn {
+  min-width: 0;
+  padding-inline: 0.5rem;
+}
+
+@media (max-width: 1280px) {
+  .cdk-record-head {
+    display: none;
+  }
+  .cdk-record-row {
+    grid-template-columns: minmax(0, 1.2fr) minmax(120px, 0.8fr);
+    align-items: start;
+    gap: 0.7rem 1rem;
+  }
+  .cdk-record-row > span,
+  .cdk-record-row > div:not(.cdk-record-topic):not(.cdk-record-actions) {
+    display: grid;
+    gap: 0.2rem;
+  }
+  .cdk-record-row [data-label]::before {
+    content: attr(data-label);
+    color: rgba(36, 33, 29, 0.48);
+    font-size: 0.72rem;
+    font-weight: 900;
+  }
+  .cdk-record-row .cdk-status-pill::before {
+    content: "";
+    display: none;
+  }
+  .cdk-record-actions {
+    grid-column: 1 / -1;
+    padding-top: 0.35rem;
+    border-top: 1px dashed rgba(36, 33, 29, 0.16);
+  }
 }
 
 .daily-loading {
