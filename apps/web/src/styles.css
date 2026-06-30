@@ -4981,6 +4981,121 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   font-size: 0.9rem;
 }
 
+.cdk-records-layout {
+  grid-template-columns: minmax(280px, 0.82fr) minmax(520px, 1.5fr);
+}
+
+.cdk-record-filter-card,
+.cdk-record-results-card {
+  align-self: start;
+}
+
+.cdk-record-filter-card {
+  position: sticky;
+  top: 1rem;
+}
+
+.cdk-record-filter-grid {
+  margin-top: 1rem;
+}
+
+.cdk-record-table {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.cdk-record-head,
+.cdk-record-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(150px, 0.9fr) 86px 110px 86px 130px 132px;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.cdk-record-head {
+  color: rgba(36, 33, 29, 0.58);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 0.75rem;
+}
+
+.cdk-record-row {
+  border: 1px solid rgba(36, 33, 29, 0.14);
+  border-radius: 8px;
+  background: #fffdf8;
+  padding: 0.85rem 0.75rem;
+}
+
+.cdk-record-row:hover {
+  border-color: rgba(18, 63, 75, 0.42);
+  box-shadow: 3px 3px 0 rgba(18, 63, 75, 0.16);
+}
+
+.cdk-record-topic {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.cdk-record-topic strong {
+  overflow-wrap: anywhere;
+}
+
+.cdk-record-topic small,
+.cdk-record-row small {
+  display: block;
+  color: rgba(36, 33, 29, 0.58);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.cdk-source-pill,
+.cdk-status-pill {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border: 1px solid rgba(36, 33, 29, 0.18);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  background: #f7efe0;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.cdk-source-pill.own_llm {
+  background: #e9f1f2;
+  border-color: rgba(18, 63, 75, 0.24);
+}
+
+.cdk-source-pill.cdk {
+  background: #fff2d2;
+  border-color: rgba(164, 101, 22, 0.28);
+}
+
+.cdk-status-pill.success {
+  background: #e6f4ea;
+  border-color: rgba(43, 122, 72, 0.24);
+}
+
+.cdk-status-pill.error {
+  background: #fde8e2;
+  border-color: rgba(180, 64, 44, 0.24);
+}
+
+.cdk-status-pill.running,
+.cdk-status-pill.queued {
+  background: #e9f1f2;
+  border-color: rgba(18, 63, 75, 0.24);
+}
+
+.cdk-record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .daily-loading {
   max-width: 960px;
   margin: 5rem auto;
@@ -5021,6 +5136,17 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
   }
   .literature-form {
     position: static;
+  }
+  .cdk-records-layout,
+  .cdk-record-head,
+  .cdk-record-row {
+    grid-template-columns: 1fr;
+  }
+  .cdk-record-filter-card {
+    position: static;
+  }
+  .cdk-record-head {
+    display: none;
   }
 }
 

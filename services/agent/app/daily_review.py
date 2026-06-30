@@ -281,6 +281,7 @@ class LiteratureSearchSummary(BaseModel):
     searchId: str
     topic: str
     sharePath: str
+    sourceType: Literal["cdk", "own_llm", "unknown"] = "unknown"
     cdkId: str | None = None
     cdkName: str | None = None
     requested: int = 0
@@ -3608,6 +3609,7 @@ def _save_literature_search_payload(
     *,
     result: dict[str, Any] | None = None,
     progress: dict[str, Any] | None = None,
+    request_meta: dict[str, Any] | None = None,
 ) -> None:
     path = _literature_search_path(search_id)
     payload: dict[str, Any] = {}
@@ -3622,6 +3624,8 @@ def _save_literature_search_payload(
         payload["progress"] = progress
     if result is not None:
         payload["result"] = result
+    if request_meta is not None:
+        payload["request"] = request_meta
     payload["updatedAt"] = datetime.now(timezone.utc).isoformat()
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     if result is not None:
@@ -3639,20 +3643,56 @@ def _load_literature_search_payload(search_id: str) -> dict[str, Any] | None:
         return None
 
 
+def _literature_search_request_meta(
+    body: LiteratureOnlySearchRequest,
+    config: DailyReviewConfig | None = None,
+) -> dict[str, Any]:
+    config = config or _load_config()
+    cdk = _find_valid_literature_cdk(config, body.cdk or "")
+    own_llm = bool(
+        body.llm
+        and _usable_secret_override(body.llm.apiKey)
+        and body.llm.baseUrl.strip()
+        and body.llm.model.strip()
+    )
+    provider = body.literatureProvider or (cdk.literatureProvider if cdk and cdk.literatureProvider else config.literatureProvider)
+    sources = _normalize_paper_search_sources(
+        body.paperSearchSources
+        or (cdk.paperSearchSources if cdk and cdk.paperSearchSources else None)
+        or config.paperSearchSources
+    )
+    return {
+        "topic": _clean_text(body.topic),
+        "sourceType": "own_llm" if own_llm else ("cdk" if cdk else "unknown"),
+        "cdkId": cdk.id if cdk else None,
+        "cdkName": cdk.name if cdk else None,
+        "requested": int(body.paperCount or 0),
+        "sinceYear": body.sinceYear,
+        "literatureProvider": provider,
+        "paperSearchSources": sources,
+        "hasOwnLlm": own_llm,
+    }
+
+
 def _literature_search_summary_from_payload(search_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     progress = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
+    request_meta = payload.get("request") if isinstance(payload.get("request"), dict) else {}
     cdk = result.get("cdk") if isinstance(result.get("cdk"), dict) else {}
+    source_type = str(result.get("sourceType") or request_meta.get("sourceType") or "")
+    if source_type not in {"cdk", "own_llm", "unknown"}:
+        source_type = "cdk" if (result.get("cdkId") or cdk.get("id") or request_meta.get("cdkId")) else "unknown"
     return {
         "searchId": search_id,
-        "topic": str(result.get("topic") or progress.get("message") or "未命名检索"),
+        "topic": str(result.get("topic") or request_meta.get("topic") or progress.get("message") or "未命名检索"),
         "sharePath": str(result.get("sharePath") or progress.get("sharePath") or f"/literature-search/{search_id}"),
-        "cdkId": result.get("cdkId") or cdk.get("id"),
-        "cdkName": result.get("cdkName") or cdk.get("name"),
-        "requested": int(result.get("requested") or progress.get("total") or 0),
+        "sourceType": source_type,
+        "cdkId": result.get("cdkId") or cdk.get("id") or request_meta.get("cdkId"),
+        "cdkName": result.get("cdkName") or cdk.get("name") or request_meta.get("cdkName"),
+        "requested": int(result.get("requested") or request_meta.get("requested") or progress.get("total") or 0),
         "returned": int(result.get("returned") or progress.get("current") or 0),
-        "sinceYear": result.get("sinceYear"),
-        "literatureProvider": result.get("literatureProvider"),
+        "sinceYear": result.get("sinceYear") or request_meta.get("sinceYear"),
+        "literatureProvider": result.get("literatureProvider") or request_meta.get("literatureProvider"),
         "status": str(progress.get("status") or ("success" if result else "unknown")),
         "createdAt": result.get("createdAt") or progress.get("startedAt"),
         "updatedAt": payload.get("updatedAt") or progress.get("updatedAt"),
@@ -3697,7 +3737,7 @@ def _iter_literature_search_summaries() -> list[dict[str, Any]]:
         except (OSError, json.JSONDecodeError):
             rows = []
     if rows:
-        return rows
+        return _merge_literature_search_summaries_with_payloads(rows)
     for item_path in _literature_search_dir().glob("*.json"):
         if item_path.name == "index.jsonl":
             continue
@@ -3709,6 +3749,106 @@ def _iter_literature_search_summaries() -> list[dict[str, Any]]:
     if rows:
         _write_literature_search_index(rows[:5000])
     return rows
+
+
+def _merge_literature_search_summaries_with_payloads(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for item in rows:
+        search_id = str(item.get("searchId") or "")
+        if not search_id:
+            continue
+        if item.get("sourceType"):
+            by_id[search_id] = item
+            continue
+        payload = _load_literature_search_payload(search_id)
+        by_id[search_id] = _literature_search_summary_from_payload(search_id, payload) if payload else item
+    for item_path in _literature_search_dir().glob("*.json"):
+        if item_path.name == "index.jsonl":
+            continue
+        search_id = item_path.stem
+        if search_id in by_id:
+            continue
+        payload = _load_literature_search_payload(search_id)
+        if payload:
+            by_id[search_id] = _literature_search_summary_from_payload(search_id, payload)
+    merged = list(by_id.values())
+    return sorted(merged, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+
+
+def _parse_search_filter_datetime(value: str | None) -> datetime | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=BEIJING_TZ)
+    return parsed.astimezone(timezone.utc)
+
+
+def _summary_time_for_filter(item: dict[str, Any]) -> datetime | None:
+    return _parse_search_filter_datetime(str(item.get("createdAt") or item.get("updatedAt") or ""))
+
+
+def _filter_literature_search_summaries(
+    rows: list[dict[str, Any]],
+    *,
+    scope: str | None = None,
+    cdk_id: str | None = None,
+    query: str | None = None,
+    status: str | None = None,
+    provider: str | None = None,
+    since_year_from: int | None = None,
+    since_year_to: int | None = None,
+    created_from: str | None = None,
+    created_to: str | None = None,
+) -> list[dict[str, Any]]:
+    scope_value = (scope or "all").strip().lower()
+    cdk_value = (cdk_id or "").strip()
+    query_value = _clean_text(query).lower()
+    status_value = (status or "").strip().lower()
+    provider_value = (provider or "").strip().lower()
+    created_from_dt = _parse_search_filter_datetime(created_from)
+    created_to_dt = _parse_search_filter_datetime(created_to)
+    filtered: list[dict[str, Any]] = []
+    for item in rows:
+        source_type = str(item.get("sourceType") or "unknown")
+        if scope_value not in {"all", "cdk", "own_llm"}:
+            continue
+        if scope_value == "cdk" and source_type != "cdk":
+            continue
+        if scope_value == "own_llm" and source_type != "own_llm":
+            continue
+        if cdk_value and str(item.get("cdkId") or "") != cdk_value:
+            continue
+        if status_value and str(item.get("status") or "").lower() != status_value:
+            continue
+        if provider_value and str(item.get("literatureProvider") or "").lower() != provider_value:
+            continue
+        try:
+            year_int = int(item.get("sinceYear")) if item.get("sinceYear") is not None else None
+        except (TypeError, ValueError):
+            year_int = None
+        if since_year_from is not None and (year_int is None or year_int < since_year_from):
+            continue
+        if since_year_to is not None and (year_int is None or year_int > since_year_to):
+            continue
+        created = _summary_time_for_filter(item)
+        if created_from_dt and (created is None or created < created_from_dt):
+            continue
+        if created_to_dt and (created is None or created > created_to_dt):
+            continue
+        if query_value:
+            haystack = " ".join(
+                str(item.get(key) or "")
+                for key in ("searchId", "topic", "sharePath", "cdkName", "literatureProvider", "status")
+            ).lower()
+            if query_value not in haystack:
+                continue
+        filtered.append(item)
+    return filtered
 
 
 def _set_literature_search_progress(
@@ -5063,6 +5203,7 @@ def _literature_search_uses_cdk(body: LiteratureOnlySearchRequest, result: Liter
 async def search_literature_only(body: LiteratureOnlySearchRequest, request: Request):
     _check_literature_search_rate_limit(request)
     search_id = _new_literature_search_id(body.topic)
+    _save_literature_search_payload(search_id, request_meta=_literature_search_request_meta(body))
     result = await _execute_literature_search(body, request.app, request=request, search_id=search_id)
     _save_literature_search_payload(search_id, result=result.model_dump())
     if _literature_search_uses_cdk(body, result):
@@ -5078,6 +5219,7 @@ async def search_literature_only_async(body: LiteratureOnlySearchRequest, reques
     _check_literature_search_rate_limit(request)
     app = request.app
     search_id = _new_literature_search_id(body.topic)
+    _save_literature_search_payload(search_id, request_meta=_literature_search_request_meta(body))
     progress_item = _set_literature_search_progress(
         search_id,
         status="queued",
@@ -5179,12 +5321,34 @@ async def get_literature_search_result(search_id: str):
 
 
 @router.get("/admin/literature-searches", response_model=LiteratureSearchListResult)
-async def get_admin_literature_searches(request: Request, cdkId: str | None = None, limit: int = 300):
+async def get_admin_literature_searches(
+    request: Request,
+    cdkId: str | None = None,
+    scope: str | None = None,
+    q: str | None = None,
+    status: str | None = None,
+    provider: str | None = None,
+    sinceYearFrom: int | None = None,
+    sinceYearTo: int | None = None,
+    createdFrom: str | None = None,
+    createdTo: str | None = None,
+    limit: int = 300,
+):
     _require_admin(request)
     limit = max(1, min(limit, 1000))
     rows = _iter_literature_search_summaries()
-    if cdkId:
-        rows = [item for item in rows if str(item.get("cdkId") or "") == cdkId]
+    rows = _filter_literature_search_summaries(
+        rows,
+        scope=scope,
+        cdk_id=cdkId,
+        query=q,
+        status=status,
+        provider=provider,
+        since_year_from=sinceYearFrom,
+        since_year_to=sinceYearTo,
+        created_from=createdFrom,
+        created_to=createdTo,
+    )
     return LiteratureSearchListResult(items=[LiteratureSearchSummary(**item) for item in rows[:limit]])
 
 

@@ -453,6 +453,7 @@ export interface LiteratureSearchSummary {
   searchId: string;
   topic: string;
   sharePath: string;
+  sourceType?: "cdk" | "own_llm" | "unknown";
   cdkId?: string | null;
   cdkName?: string | null;
   requested: number;
@@ -462,6 +463,19 @@ export interface LiteratureSearchSummary {
   status: string;
   createdAt?: string | null;
   updatedAt?: string | null;
+}
+
+export interface AdminLiteratureSearchFilters {
+  scope?: "all" | "cdk" | "own_llm";
+  cdkId?: string;
+  q?: string;
+  status?: string;
+  provider?: string;
+  sinceYearFrom?: number | string;
+  sinceYearTo?: number | string;
+  createdFrom?: string;
+  createdTo?: string;
+  limit?: number;
 }
 
 export interface DailyReviewPdfResolveResult {
@@ -740,9 +754,21 @@ export async function getDailyReviewAdminRuns(limit = 80, adminToken?: string): 
   );
 }
 
-export async function getAdminLiteratureSearches(adminToken?: string, cdkId?: string, limit = 300): Promise<{ items: LiteratureSearchSummary[] }> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (cdkId) params.set("cdkId", cdkId);
+export async function getAdminLiteratureSearches(
+  adminToken?: string,
+  cdkIdOrFilters?: string | AdminLiteratureSearchFilters,
+  limit = 300,
+): Promise<{ items: LiteratureSearchSummary[] }> {
+  const filters: AdminLiteratureSearchFilters =
+    typeof cdkIdOrFilters === "string"
+      ? { cdkId: cdkIdOrFilters, limit }
+      : { ...(cdkIdOrFilters ?? {}), limit: cdkIdOrFilters?.limit ?? limit };
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      params.set(key, String(value));
+    }
+  });
   return handle<{ items: LiteratureSearchSummary[] }>(
     await doFetch(`${BASE}/daily-review/admin/literature-searches?${params.toString()}`, {
       headers: authHeaders(adminToken),

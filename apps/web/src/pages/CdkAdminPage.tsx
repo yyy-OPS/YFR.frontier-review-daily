@@ -236,6 +236,7 @@ export function CdkAdminPage() {
             <button className="btn" type="button" onClick={addBatch}>批量生成</button>
             <button className="btn btn-ghost" type="button" onClick={() => void copySelected()} disabled={!cdks.length}>批量复制</button>
             <button className="btn btn-ghost" type="button" onClick={() => void save()} disabled={!config || saving}>{saving ? "保存中..." : "保存配置"}</button>
+            <a className="btn btn-ghost" href="/admin/CDK/records">检索记录</a>
             <a className="btn btn-ghost" href="/admin">返回主管理员后台</a>
           </div>
           {status && <p className="daily-status ok">{status}</p>}
