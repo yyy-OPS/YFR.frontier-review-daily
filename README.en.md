@@ -2,7 +2,7 @@
 
 Frontier Review is a self-hostable multi-topic literature monitoring and review-generation system for researchers, engineering teams, and research-content operators. Administrators can configure multiple research topics, schedule or manually trigger multi-source literature search, evidence filtering, deduplication, field merging, quality scoring, Daily Delta classification, LLM-based review writing, infographic generation, open-access PDF detection, translation, and WeChat Official Account draft creation.
 
-This project is extended and engineered from the ideas and part of the technical foundation of [niuniu-869/Biblio_Agent](https://github.com/niuniu-869/Biblio_Agent), and it also references the multi-source paper search approach of [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp). It focuses on long-running multi-topic frontier monitoring and traceable AI-assisted review production. Thanks to the related open-source authors and contributors.
+This project is extended and engineered from the ideas and part of the technical foundation of [niuniu-869/Biblio_Agent](https://github.com/niuniu-869/aria-review), and it also references the multi-source paper search approach of [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp). It focuses on long-running multi-topic frontier monitoring and traceable AI-assisted review production. Thanks to the related open-source authors and contributors.
 
 [中文 README](./README.md)
 
