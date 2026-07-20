@@ -2,7 +2,7 @@
 
 研域前沿综述是一个可自部署的多主题前沿文献监测与综述生成系统，面向研究人员、工程技术团队和科研内容运营者。系统支持管理员配置多个研究主题，定时或手动触发多源文献检索、证据筛选、去重融合、质量评分、Daily Delta 判断、LLM 综述撰写、一图看懂、开放 PDF 线索检测、翻译和微信公众号草稿生成。
 
-本项目基于 [niuniu-869/Biblio_Agent](https://github.com/niuniu-869/Biblio_Agent) 的思想和部分工程基础继续扩展，并参考 [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp) 的多源论文检索思路，重点面向“多主题长期滚动前沿监测”和“可溯源综述生产”场景进行工程化改造。感谢相关开源项目作者和社区贡献者。
+本项目基于 [niuniu-869/Biblio_Agent](https://github.com/niuniu-869/aria-review) 的思想和部分工程基础继续扩展，并参考 [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp) 的多源论文检索思路，重点面向“多主题长期滚动前沿监测”和“可溯源综述生产”场景进行工程化改造。感谢相关开源项目作者和社区贡献者。
 
 [English README](./README.en.md)
 
